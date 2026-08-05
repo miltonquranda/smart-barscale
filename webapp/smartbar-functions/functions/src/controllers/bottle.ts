@@ -44,6 +44,56 @@ export default class BottleCtrl extends BaseCtrl {
     }
   };
 
+  /**
+   * Name/brand/barcode search over the catalog.
+   *
+   * Firestore has no substring index, so this pages through the collection and
+   * filters in memory. That is acceptable for a catalog in the low thousands
+   * and keeps the mobile app off `GET /bottles`, which returns everything.
+   * If the catalog grows past ~10k, move this to a search service rather than
+   * raising the scan cap.
+   */
+  search = async (req, res) => {
+    try {
+      const term = String(req.query.q || '').trim().toLowerCase();
+      if (term.length < 2) {
+        return res.status(400).json({ error: 'Search term must be at least 2 characters.' });
+      }
+      const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 25, 1), 50);
+
+      const snapshot = await db.collection(this.collectionName).limit(5000).get();
+      const matches: any[] = [];
+      for (const doc of snapshot.docs) {
+        const b: any = doc.data();
+        const name = String(b.name || '').toLowerCase();
+        const brand = String(b.brand || '').toLowerCase();
+        const barcode = String(b.barcode || '');
+        if (name.includes(term) || brand.includes(term) || barcode.includes(term)) {
+          matches.push({
+            _id: doc.id,
+            barcode: b.barcode,
+            name: b.name,
+            brand: b.brand,
+            image_url: b.image_url || null,
+            bottle_volume_ml: b.bottle_volume_ml ?? null,
+            bottle_full_weight_g: b.bottle_full_weight_g ?? null,
+            bottle_empty_weight_g: b.bottle_empty_weight_g ?? null,
+            cost_per_bottle: b.cost_per_bottle ?? null,
+            pour_price: b.pour_price ?? null,
+            pour_volume_ml: b.pour_volume_ml ?? null,
+            par_level: b.par_level ?? null,
+            specs_estimated: b.specs_estimated === true,
+          });
+          if (matches.length >= limit) break;
+        }
+      }
+      res.status(200).json({ results: matches, term });
+    } catch (err) {
+      console.error('Product search failed:', err);
+      res.status(500).json({ error: err.message });
+    }
+  };
+
   getByBarcode = async (req, res) => {
     try {
       const barcode = req.params.barcode;

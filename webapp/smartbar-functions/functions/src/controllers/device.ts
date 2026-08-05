@@ -1,7 +1,6 @@
-import * as jwt from 'jsonwebtoken';
 import { db } from '../firebase';
 import BaseCtrl from './base';
-import { DEMO_DEVICE_SERIALS } from './demo';
+import { signDeviceToken } from '../auth';
 
 export default class DeviceCtrl extends BaseCtrl {
   collectionName = 'devices';
@@ -84,37 +83,35 @@ export default class DeviceCtrl extends BaseCtrl {
 
   login = async (req, res) => {
     try {
-      const snapshot = await db.collection(this.collectionName).where('serialNumber', '==', req.body.serialNumber).limit(1).get();
+      const serialNumber = String(req.body.serialNumber || '').trim();
+      if (!serialNumber) return res.status(400).json({ error: 'serialNumber is required' });
+
+      const snapshot = await db.collection(this.collectionName)
+        .where('serialNumber', '==', serialNumber).limit(1).get();
+
       if (snapshot.empty) {
-        // Auto-register device
-        const newDeviceRef = await db.collection(this.collectionName).add({
-          serialNumber: req.body.serialNumber,
+        // Auto-register on first contact. A device starts unassigned; a human
+        // attaches it to a business from the mobile app or platform admin.
+        // Demo status is a property of the device record, never inferred from
+        // the serial number.
+        const ref = await db.collection(this.collectionName).add({
+          serialNumber,
           createdAt: new Date(),
           status: 'online',
-          ...(DEMO_DEVICE_SERIALS.includes(req.body.serialNumber) ? { business: 'demo-bar', demo: true } : {}),
+          demo: false,
+          lastSeenAt: new Date(),
         });
-        const isDemo = DEMO_DEVICE_SERIALS.includes(req.body.serialNumber);
-        const token = jwt.sign({ serialNumber: { _id: newDeviceRef.id, serialNumber: req.body.serialNumber, business: isDemo ? 'demo-bar' : undefined, demo: isDemo } }, process.env.SECRET_TOKEN as string);
-        return res.status(200).json({ token: token });
+        return res.status(200).json({ token: signDeviceToken({ _id: ref.id, serialNumber }) });
       }
+
       const doc = snapshot.docs[0];
       const device: any = { _id: doc.id, ...doc.data() };
 
-      if (DEMO_DEVICE_SERIALS.includes(req.body.serialNumber) && device.business !== 'demo-bar') {
-        await doc.ref.update({ business: 'demo-bar', demo: true, status: 'online' });
-        device.business = 'demo-bar';
-        device.demo = true;
-      }
+      await doc.ref.update({ status: 'online', lastSeenAt: new Date() });
 
-      if (device.business) {
-        const bizDoc = await db.collection('businesses').doc(device.business).get();
-        if (bizDoc.exists) device.business = { _id: bizDoc.id, ...bizDoc.data() };
-      }
-
-      const token = jwt.sign({ serialNumber: device }, process.env.SECRET_TOKEN as string);
-      res.status(200).json({ token: token });
+      res.status(200).json({ token: signDeviceToken(device) });
     } catch (err) {
-      console.error(err);
+      console.error('Device login failed:', err);
       res.status(500).json({ error: err.message });
     }
   }

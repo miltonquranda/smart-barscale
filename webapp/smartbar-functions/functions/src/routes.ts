@@ -60,6 +60,7 @@ export default function setRoutes(app) {
   // both need lookups); writes are restricted to staff roles.
   router.route("/bottles").get(bottleCtrl.getAll);
   router.route("/bottles/page").get(bottleCtrl.getPage);
+  router.route("/bottles/search").get(bottleCtrl.search);
   router.route("/bottles/count").get(bottleCtrl.count);
   router.route("/bottle/:id").get(bottleCtrl.get);
   router.route("/bottles/:businessId").get(requireUser, bottleCtrl.getAllInBusiness);
@@ -133,6 +134,8 @@ export default function setRoutes(app) {
   router.route("/inventory/session/:id").delete(requireUser, inventoryCtrl.deleteSession);
 
   // ─── Inventory readings ────────────────────────────────────────────────
+  // Compact per-product position for the mobile app.
+  router.route("/inventory/summary").get(requireUser, inventoryCtrl.getMobileSummary);
   router.route("/inventory/readings").get(requireUser, inventoryCtrl.getReadings);
   router.route("/inventory/reading").post(inventoryCtrl.addReadingAPI);
   router.route("/inventory/reading/:id").delete(requireUser, inventoryCtrl.deleteReading);

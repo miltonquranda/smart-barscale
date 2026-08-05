@@ -62,6 +62,28 @@ export default class PlatformCtrl {
     } catch (err) { res.status(500).json({ error: err.message }); }
   };
 
+  /**
+   * Mark a device as a demo unit, or clear that flag.
+   *
+   * Demo devices mirror their scans into the demo dataset for sales
+   * demonstrations. This must be an explicit, auditable decision — inferring it
+   * from the serial number is how a real pilot device ends up writing into demo
+   * collections.
+   */
+  setDeviceDemo = async (req, res) => {
+    try {
+      const demo = req.body?.demo;
+      if (typeof demo !== 'boolean') return res.status(400).json({ error: 'demo must be true or false.' });
+
+      const ref = db.collection('devices').doc(req.params.id);
+      const doc = await ref.get();
+      if (!doc.exists) return res.status(404).json({ error: 'Device not found.' });
+
+      await ref.update({ demo, updatedAt: new Date() });
+      res.json({ _id: doc.id, ...doc.data(), demo });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  };
+
   assignDevice = async (req, res) => {
     try {
       const { businessId } = req.body || {};

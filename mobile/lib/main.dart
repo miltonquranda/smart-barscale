@@ -4,8 +4,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+
+import 'account_screen.dart';
+import 'api.dart';
+import 'count_screen.dart';
+import 'events_screen.dart';
+import 'inventory_screen.dart';
+import 'scale_service.dart';
+import 'spec_capture.dart';
+
 
 // ─── BLE UUIDs (must match ESP32 firmware) ───
 final _svcConfig = Uuid.parse('b4e3a900-5a2b-4f1c-9d7a-000000000001');
@@ -48,7 +56,7 @@ class OmniScaleApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const HomePage(),
+      home: const AppShell(),
     );
   }
 }
@@ -109,6 +117,14 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    SmartBarApi.restore();
+    // Load the stored server URL immediately. The BLE device restore below also
+    // sets it, but it completes after the other tabs have already built and
+    // asked for it.
+    ScaleService.instance.restore();
+    // The Account tab can also set the server URL. Mirror it back so this
+    // screen's own lookups and its "no server" banner stay in step.
+    ScaleService.instance.serverUrl.addListener(_onSharedServerUrlChanged);
     _loadSavedDevice();
   }
 
@@ -132,6 +148,9 @@ class _HomePageState extends State<HomePage> {
       _serverUrl = url;
       _deviceSerial = serial;
     });
+    ScaleService.instance.setServerUrl(url);
+    SmartBarApi.setSerial(serial);
+              ScaleService.instance.setSerial(serial);
   }
 
   Future<void> _saveDevice(String id, String name) async {
@@ -187,6 +206,9 @@ class _HomePageState extends State<HomePage> {
         .listen(
           (state) {
             setState(() => _connState = state.connectionState);
+            ScaleService.instance.setConnected(
+              state.connectionState == DeviceConnectionState.connected,
+            );
             if (state.connectionState == DeviceConnectionState.connected) {
               _saveDevice(id, name);
               // Extract device serial from BLE name (e.g. "OmniScale-SB_A40FB1215788")
@@ -211,6 +233,7 @@ class _HomePageState extends State<HomePage> {
           },
           onError: (_) {
             setState(() => _connState = DeviceConnectionState.disconnected);
+            ScaleService.instance.setConnected(false);
           },
         );
   }
@@ -249,7 +272,13 @@ class _HomePageState extends State<HomePage> {
           ),
         )
         .listen((data) {
-          if (data.isNotEmpty) setState(() => _weight = utf8.decode(data));
+          if (data.isNotEmpty) {
+            final value = utf8.decode(data);
+            setState(() => _weight = value);
+            // Mirror to the shared service so Count and Measure can read the
+            // live weight without owning a second BLE connection.
+            ScaleService.instance.setWeight(value);
+          }
         });
 
     _barcodeSub = _ble
@@ -263,9 +292,15 @@ class _HomePageState extends State<HomePage> {
         .listen((data) {
           if (data.isNotEmpty) {
             final code = utf8.decode(data);
-            if (code != _barcode && code != '--') {
-              setState(() => _barcode = code);
-              _fetchProduct(code);
+            if (code != '--') {
+              // Publish every scan, including a repeat of the same code: count
+              // mode needs to see a rescan as a fresh event so a bottle can be
+              // recounted to correct a mistake.
+              ScaleService.instance.setBarcode(code);
+              if (code != _barcode) {
+                setState(() => _barcode = code);
+                _fetchProduct(code);
+              }
             }
           }
         });
@@ -279,7 +314,11 @@ class _HomePageState extends State<HomePage> {
           ),
         )
         .listen((data) {
-          if (data.isNotEmpty) setState(() => _status = utf8.decode(data));
+          if (data.isNotEmpty) {
+            final value = utf8.decode(data);
+            setState(() => _status = value);
+            ScaleService.instance.setStatus(value);
+          }
         });
 
     _wifiStatusSub = _ble
@@ -320,6 +359,8 @@ class _HomePageState extends State<HomePage> {
                 prefs.setString('device_serial', serial);
               });
               setState(() => _deviceSerial = serial);
+              SmartBarApi.setSerial(serial);
+              ScaleService.instance.setSerial(serial);
               if (_serverUrl.isNotEmpty) _fetchDeviceInfo();
             }
           }
@@ -427,6 +468,8 @@ class _HomePageState extends State<HomePage> {
           prefs.setString('device_serial', serial);
         });
         setState(() => _deviceSerial = serial);
+        SmartBarApi.setSerial(serial);
+              ScaleService.instance.setSerial(serial);
       }
     }
   }
@@ -463,6 +506,8 @@ class _HomePageState extends State<HomePage> {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('device_serial', serial);
           if (mounted) setState(() => _deviceSerial = serial);
+          SmartBarApi.setSerial(serial);
+              ScaleService.instance.setSerial(serial);
         }
       } catch (e) {
         debugPrint('BLE read deviceID FAILED: $e');
@@ -484,6 +529,7 @@ class _HomePageState extends State<HomePage> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('server_url', url);
         if (mounted) setState(() => _serverUrl = url);
+        ScaleService.instance.setServerUrl(url);
       }
     } catch (e) {
       debugPrint('BLE read serverURL FAILED: $e');
@@ -521,9 +567,12 @@ class _HomePageState extends State<HomePage> {
     }
     setState(() => _deviceInfoLoading = true);
     try {
-      final uri = Uri.parse('$base/api/device/serial/$_deviceSerial');
-      debugPrint('Fetching device info: $uri');
-      final resp = await http.get(uri).timeout(const Duration(seconds: 10));
+      debugPrint('Fetching device info for $_deviceSerial');
+      final resp = await SmartBarApi.get(
+        base,
+        '/api/device/serial/$_deviceSerial',
+        timeout: const Duration(seconds: 10),
+      );
       debugPrint('Device info response: ${resp.statusCode}');
       if (!mounted) return;
       if (resp.statusCode == 200) {
@@ -549,14 +598,12 @@ class _HomePageState extends State<HomePage> {
     final base = _getServerBaseUrl();
     if (base == null) return;
     try {
-      final uri = Uri.parse('$base/api/device/serial/$_deviceSerial/assign');
-      final resp = await http
-          .post(
-            uri,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'businessId': businessId}),
-          )
-          .timeout(const Duration(seconds: 10));
+      final resp = await SmartBarApi.post(
+        base,
+        '/api/device/serial/$_deviceSerial/assign',
+        {'businessId': businessId},
+        timeout: const Duration(seconds: 10),
+      );
       if (!mounted) return;
       if (resp.statusCode == 200) {
         _fetchDeviceInfo();
@@ -571,19 +618,122 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// Returns the business list, or throws [NeedsSignIn] if the current
+  /// credential isn't permitted to see it.
+  ///
+  /// Listing every business on the platform is a tenant-wide operation, so it
+  /// requires a staff login — a device credential deliberately cannot do it,
+  /// otherwise any scale could enumerate every customer.
   Future<List<Map<String, dynamic>>> _fetchBusinesses() async {
     final base = _getServerBaseUrl();
     if (base == null) return [];
     try {
-      final uri = Uri.parse('$base/api/businesses');
-      final resp = await http.get(uri).timeout(const Duration(seconds: 10));
+      final resp = await SmartBarApi.get(
+        base,
+        '/api/businesses',
+        timeout: const Duration(seconds: 10),
+      );
       if (resp.statusCode == 200) {
         return (jsonDecode(resp.body) as List).cast<Map<String, dynamic>>();
       }
+      if (resp.statusCode == 401 || resp.statusCode == 403) {
+        throw NeedsSignIn();
+      }
+    } on NeedsSignIn {
+      rethrow;
     } catch (e) {
       debugPrint('Fetch businesses error: $e');
     }
     return [];
+  }
+
+  /// Prompt for staff credentials. Returns true if sign-in succeeded.
+  Future<bool> _promptSignIn() async {
+    final base = _getServerBaseUrl();
+    if (base == null) return false;
+    final emailCtrl = TextEditingController();
+    final passCtrl = TextEditingController();
+    String? error;
+    bool busy = false;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Staff sign in'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Assigning a device to a business requires a manager or admin '
+                'account.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: passCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      setDialogState(() {
+                        busy = true;
+                        error = null;
+                      });
+                      final err = await SmartBarApi.loginUser(
+                        base,
+                        emailCtrl.text.trim(),
+                        passCtrl.text,
+                      );
+                      if (err == null) {
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                      } else {
+                        setDialogState(() {
+                          busy = false;
+                          error = err;
+                        });
+                      }
+                    },
+              child: Text(busy ? 'Signing in...' : 'Sign in'),
+            ),
+          ],
+        ),
+      ),
+    );
+    return ok ?? false;
   }
 
   // ─── BLE Write helpers ───
@@ -634,9 +784,12 @@ class _HomePageState extends State<HomePage> {
     }
 
     try {
-      final uri = Uri.parse('$baseUrl/api/product/$barcode');
-      debugPrint('Product lookup: $uri');
-      final resp = await http.get(uri).timeout(const Duration(seconds: 25));
+      debugPrint('Product lookup: $barcode');
+      final resp = await SmartBarApi.get(
+        baseUrl,
+        '/api/product/$barcode',
+        timeout: const Duration(seconds: 25),
+      );
 
       if (!mounted) return;
       if (resp.statusCode == 200) {
@@ -653,6 +806,10 @@ class _HomePageState extends State<HomePage> {
             'weight': data['weight'],
             'pour_price': data['pour_price'],
             'pour_volume_ml': data['pour_volume_ml'],
+            'bottle_full_weight_g': data['bottle_full_weight_g'],
+            'bottle_empty_weight_g': data['bottle_empty_weight_g'],
+            'bottle_volume_ml': data['bottle_volume_ml'],
+            'cost_per_bottle': data['cost_per_bottle'],
             'country_of_origin': data['country_of_origin'],
             'ingredients': data['ingredients'],
             'nutrition_per_100': data['nutrition_per_100'],
@@ -688,6 +845,48 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// Open the guided measurement sheet for the product on the scale.
+  ///
+  /// Offered at scan time because that is when the bottle is physically on the
+  /// scale — asking someone to go and find it later is why empty weights stay
+  /// estimated, and estimated weights are what make pour cost untrustworthy.
+  Future<void> _openSpecCapture(String barcode) async {
+    final base = _getServerBaseUrl();
+    if (base == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Set the server URL first')),
+      );
+      return;
+    }
+    double? asDouble(dynamic v) =>
+        v == null ? null : double.tryParse(v.toString());
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SpecCaptureSheet(
+        barcode: barcode,
+        productName: _product?['product_name']?.toString() ?? barcode,
+        baseUrl: base,
+        initialFullWeight: asDouble(_product?['bottle_full_weight_g']),
+        initialEmptyWeight: asDouble(_product?['bottle_empty_weight_g']),
+        initialVolumeMl: asDouble(_product?['bottle_volume_ml']),
+        wasEstimated: _product?['specs_estimated'] == true,
+      ),
+    );
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Measurements saved')),
+      );
+      _fetchProduct(barcode);
+    }
+  }
+
   // ─── Add / Edit Product ───
   final _picker = ImagePicker();
 
@@ -696,14 +895,11 @@ class _HomePageState extends State<HomePage> {
     if (baseUrl == null) return;
 
     try {
-      final uri = Uri.parse('$baseUrl/api/product/$barcode');
-      final resp = await http
-          .put(
-            uri,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(data),
-          )
-          .timeout(const Duration(seconds: 15));
+      final resp = await SmartBarApi.put(
+        baseUrl,
+        '/api/product/$barcode',
+        data,
+      );
 
       if (!mounted) return;
       if (resp.statusCode == 200 || resp.statusCode == 201) {
@@ -721,6 +917,10 @@ class _HomePageState extends State<HomePage> {
             'weight': saved['weight'],
             'pour_price': saved['pour_price'],
             'pour_volume_ml': saved['pour_volume_ml'],
+            'bottle_full_weight_g': saved['bottle_full_weight_g'],
+            'bottle_empty_weight_g': saved['bottle_empty_weight_g'],
+            'bottle_volume_ml': saved['bottle_volume_ml'],
+            'cost_per_bottle': saved['cost_per_bottle'],
             'country_of_origin': saved['country_of_origin'],
             'ingredients': saved['ingredients'],
             'nutrition_per_100': saved['nutrition_per_100'],
@@ -761,14 +961,12 @@ class _HomePageState extends State<HomePage> {
     final mime = ext.endsWith('.png') ? 'image/png' : 'image/jpeg';
 
     try {
-      final uri = Uri.parse('$baseUrl/api/product/$barcode/image');
-      final resp = await http
-          .post(
-            uri,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'image': b64, 'contentType': mime}),
-          )
-          .timeout(const Duration(seconds: 30));
+      final resp = await SmartBarApi.post(
+        baseUrl,
+        '/api/product/$barcode/image',
+        {'image': b64, 'contentType': mime},
+        timeout: const Duration(seconds: 30),
+      );
 
       if (resp.statusCode == 200) {
         final url = jsonDecode(resp.body)['image_url'] as String?;
@@ -793,6 +991,10 @@ class _HomePageState extends State<HomePage> {
     final weightCtrl = TextEditingController();
     final pourPriceCtrl = TextEditingController();
     final pourVolumeCtrl = TextEditingController();
+    final fullWeightCtrl = TextEditingController();
+    final emptyWeightCtrl = TextEditingController();
+    final volumeMlCtrl = TextEditingController();
+    final costCtrl = TextEditingController();
     final originCtrl = TextEditingController();
     final ingredientsCtrl = TextEditingController();
 
@@ -809,6 +1011,11 @@ class _HomePageState extends State<HomePage> {
       weightCtrl.text = _product!['weight'] ?? '';
       pourPriceCtrl.text = (_product!['pour_price'] ?? '').toString();
       pourVolumeCtrl.text = (_product!['pour_volume_ml'] ?? '').toString();
+      fullWeightCtrl.text = (_product!['bottle_full_weight_g'] ?? '').toString();
+      emptyWeightCtrl.text = (_product!['bottle_empty_weight_g'] ?? '')
+          .toString();
+      volumeMlCtrl.text = (_product!['bottle_volume_ml'] ?? '').toString();
+      costCtrl.text = (_product!['cost_per_bottle'] ?? '').toString();
       originCtrl.text = _product!['country_of_origin'] ?? '';
       ingredientsCtrl.text = _product!['ingredients'] ?? '';
     }
@@ -834,6 +1041,10 @@ class _HomePageState extends State<HomePage> {
           weightCtrl: weightCtrl,
           pourPriceCtrl: pourPriceCtrl,
           pourVolumeCtrl: pourVolumeCtrl,
+          fullWeightCtrl: fullWeightCtrl,
+          emptyWeightCtrl: emptyWeightCtrl,
+          volumeMlCtrl: volumeMlCtrl,
+          costCtrl: costCtrl,
           originCtrl: originCtrl,
           ingredientsCtrl: ingredientsCtrl,
           getServerBaseUrl: _getServerBaseUrl,
@@ -936,8 +1147,16 @@ class _HomePageState extends State<HomePage> {
     refCtrl.dispose();
   }
 
+  void _onSharedServerUrlChanged() {
+    final shared = ScaleService.instance.serverUrl.value;
+    if (mounted && shared != _serverUrl) {
+      setState(() => _serverUrl = shared);
+    }
+  }
+
   @override
   void dispose() {
+    ScaleService.instance.serverUrl.removeListener(_onSharedServerUrlChanged);
     _scanSub?.cancel();
     _connSub?.cancel();
     _cancelSubscriptions();
@@ -1363,7 +1582,28 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _showAssignBusinessDialog() async {
-    final businesses = await _fetchBusinesses();
+    List<Map<String, dynamic>> businesses;
+    try {
+      businesses = await _fetchBusinesses();
+    } on NeedsSignIn {
+      if (!mounted) return;
+      if (!await _promptSignIn()) return;
+      try {
+        businesses = await _fetchBusinesses();
+      } on NeedsSignIn {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'That account cannot manage device assignments. Sign in as an '
+                'administrator.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+    }
     if (!mounted || businesses.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1550,11 +1790,21 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                     const Spacer(),
-                    if (_barcode != '--')
+                    if (_barcode != '--') ...[
+                      GestureDetector(
+                        onTap: () => _openSpecCapture(_barcode),
+                        child: Icon(
+                          Icons.straighten,
+                          size: 18,
+                          color: cs.outline,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
                       GestureDetector(
                         onTap: () => _showAddProductDialog(_barcode),
                         child: Icon(Icons.edit, size: 18, color: cs.outline),
                       ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 6),
@@ -2019,11 +2269,14 @@ class _HomePageState extends State<HomePage> {
                   // Save server URL locally
                   await prefs.setString('server_url', url);
                   setState(() => _serverUrl = url);
+                  ScaleService.instance.setServerUrl(url);
 
                   // Save device serial locally
                   if (id.isNotEmpty) {
                     await prefs.setString('device_serial', id);
                     setState(() => _deviceSerial = id);
+                    SmartBarApi.setSerial(id);
+                    ScaleService.instance.setSerial(id);
                   }
 
                   // Fetch device info now that we have config
@@ -2084,6 +2337,10 @@ class _ProductForm extends StatefulWidget {
       weightCtrl,
       pourPriceCtrl,
       pourVolumeCtrl,
+      fullWeightCtrl,
+      emptyWeightCtrl,
+      volumeMlCtrl,
+      costCtrl,
       originCtrl,
       ingredientsCtrl;
   final Future<File?> Function(ImageSource source) onPickImage;
@@ -2104,6 +2361,10 @@ class _ProductForm extends StatefulWidget {
     required this.weightCtrl,
     required this.pourPriceCtrl,
     required this.pourVolumeCtrl,
+    required this.fullWeightCtrl,
+    required this.emptyWeightCtrl,
+    required this.volumeMlCtrl,
+    required this.costCtrl,
     required this.originCtrl,
     required this.ingredientsCtrl,
     required this.onPickImage,
@@ -2132,9 +2393,11 @@ class _ProductFormState extends State<_ProductForm> {
     try {
       final baseUrl = widget.getServerBaseUrl();
       if (baseUrl == null) return;
-      final resp = await http
-          .get(Uri.parse('$baseUrl/api/categories'))
-          .timeout(const Duration(seconds: 10));
+      final resp = await SmartBarApi.get(
+        baseUrl,
+        '/api/categories',
+        timeout: const Duration(seconds: 10),
+      );
       if (resp.statusCode == 200) {
         final list =
             (jsonDecode(resp.body) as List).cast<Map<String, dynamic>>();
@@ -2274,15 +2537,10 @@ class _ProductFormState extends State<_ProductForm> {
                                 final baseUrl = widget.getServerBaseUrl();
                                 if (baseUrl == null) return;
                                 try {
-                                  final resp = await http.post(
-                                    Uri.parse('$baseUrl/api/category'),
-                                    headers: {
-                                      'Content-Type': 'application/json',
-                                    },
-                                    body: jsonEncode({
-                                      'name': name,
-                                      'parent': parentId,
-                                    }),
+                                  final resp = await SmartBarApi.post(
+                                    baseUrl,
+                                    '/api/category',
+                                    {'name': name, 'parent': parentId},
                                   );
                                   if (resp.statusCode == 201) {
                                     final created =
@@ -2380,16 +2638,80 @@ class _ProductFormState extends State<_ProductForm> {
     }
   }
 
+  /// Shows what the entered specs imply, so a unit mix-up is caught before
+  /// saving rather than showing up as a nonsensical pour cost later.
+  Widget _buildSpecPreview() {
+    final full = double.tryParse(widget.fullWeightCtrl.text.trim());
+    final empty = double.tryParse(widget.emptyWeightCtrl.text.trim());
+    final volume = double.tryParse(widget.volumeMlCtrl.text.trim());
+    if (full == null || empty == null || volume == null || volume <= 0) {
+      return const SizedBox.shrink();
+    }
+    if (full <= empty) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.red.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Text(
+          'Full weight must be greater than empty weight.',
+          style: TextStyle(fontSize: 12, color: Colors.red),
+        ),
+      );
+    }
+    final density = (full - empty) / volume;
+    // Spirits sit near 0.94 g/ml, water at 1.0. Far outside that range is
+    // almost always grams/millilitres confusion.
+    final suspect = density < 0.6 || density > 1.5;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: suspect
+            ? Colors.orange.withValues(alpha: 0.10)
+            : Colors.black.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Liquid weighs ${(full - empty).toStringAsFixed(0)}g at '
+            '${volume.toStringAsFixed(0)}ml → ${density.toStringAsFixed(2)} g/ml',
+            style: const TextStyle(fontSize: 12),
+          ),
+          if (suspect)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text(
+                'That density is unusual — most spirits are about 0.94 g/ml. '
+                'Check weights are in grams and volume in millilitres.',
+                style: TextStyle(fontSize: 12, color: Colors.orange),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildField(
     String label,
     TextEditingController ctrl, {
     int maxLines = 1,
+    bool numeric = false,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: ctrl,
         maxLines: maxLines,
+        keyboardType: numeric
+            ? const TextInputType.numberWithOptions(decimal: true)
+            : TextInputType.text,
+        // Recompute the density preview as the operator types.
+        onChanged: numeric ? (_) => setState(() {}) : null,
         decoration: InputDecoration(
           labelText: label,
           border: const OutlineInputBorder(),
@@ -2578,6 +2900,64 @@ class _ProductFormState extends State<_ProductForm> {
                 ),
               ],
             ),
+            // ─── Inventory specs ───
+            // The scale reports grams. Without full weight, empty weight and
+            // volume there is no way to turn a reading into millilitres, so
+            // on-hand value, consumption and pour cost all come out zero.
+            const Padding(
+              padding: EdgeInsets.only(top: 8, bottom: 4),
+              child: Text(
+                'Inventory specs',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: Text(
+                'Weigh one full and one empty bottle on the scale. Required for '
+                'inventory tracking — printed volume alone is not enough.',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildField(
+                    'Full weight (g)',
+                    widget.fullWeightCtrl,
+                    numeric: true,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildField(
+                    'Empty weight (g)',
+                    widget.emptyWeightCtrl,
+                    numeric: true,
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildField(
+                    'Volume (ml)',
+                    widget.volumeMlCtrl,
+                    numeric: true,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildField(
+                    'Cost per bottle',
+                    widget.costCtrl,
+                    numeric: true,
+                  ),
+                ),
+              ],
+            ),
+            _buildSpecPreview(),
             _buildField('Country of Origin', widget.originCtrl),
             _buildField('Ingredients', widget.ingredientsCtrl, maxLines: 3),
             const SizedBox(height: 20),
@@ -2607,6 +2987,25 @@ class _ProductFormState extends State<_ProductForm> {
                             );
                             return;
                           }
+                          final fullW = double.tryParse(
+                            widget.fullWeightCtrl.text.trim(),
+                          );
+                          final emptyW = double.tryParse(
+                            widget.emptyWeightCtrl.text.trim(),
+                          );
+                          if (fullW != null &&
+                              emptyW != null &&
+                              fullW <= emptyW) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Full bottle weight must be greater than '
+                                  'empty bottle weight',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
                           widget.onSave({
                             'name': widget.nameCtrl.text.trim(),
                             'brand': widget.brandCtrl.text.trim(),
@@ -2624,6 +3023,21 @@ class _ProductFormState extends State<_ProductForm> {
                             ),
                             'pour_volume_ml': double.tryParse(
                               widget.pourVolumeCtrl.text.trim(),
+                            ),
+                            // Null (not 0) when blank, so the API can tell
+                            // "not set" from a deliberate zero and won't wipe
+                            // a spec that was already recorded.
+                            'bottle_full_weight_g': double.tryParse(
+                              widget.fullWeightCtrl.text.trim(),
+                            ),
+                            'bottle_empty_weight_g': double.tryParse(
+                              widget.emptyWeightCtrl.text.trim(),
+                            ),
+                            'bottle_volume_ml': double.tryParse(
+                              widget.volumeMlCtrl.text.trim(),
+                            ),
+                            'cost_per_bottle': double.tryParse(
+                              widget.costCtrl.text.trim(),
                             ),
                             'country_of_origin': widget.originCtrl.text.trim(),
                             'ingredients': widget.ingredientsCtrl.text.trim(),
@@ -2980,6 +3394,84 @@ class _WifiSettingsScreenState extends State<WifiSettingsScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── App shell ───
+
+/// Bottom-tab shell.
+///
+/// The scale screen is unchanged and lives in the first tab — connecting,
+/// configuring and scanning all work exactly as before. The other tabs are the
+/// jobs that used to require a laptop: counting stock, logging what happened,
+/// and checking where things stand.
+///
+/// Tabs are kept alive by an [IndexedStack] rather than rebuilt on switch. That
+/// matters for Count: an in-progress count is held in memory, and losing it
+/// because someone checked the Inventory tab mid-count would be infuriating.
+class AppShell extends StatefulWidget {
+  const AppShell({super.key});
+
+  @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  int _index = 0;
+
+  /// Server URL is shared state: the scale screen reads it from the device over
+  /// BLE, the Account tab lets it be set by hand, and every tab consumes it.
+  /// Normalisation lives on the service so there is one definition of it.
+  String? _serverBaseUrl() => ScaleService.instance.baseUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _index,
+        children: [
+          const HomePage(),
+          CountScreen(getServerBaseUrl: _serverBaseUrl),
+          EventsScreen(getServerBaseUrl: _serverBaseUrl),
+          InventoryScreen(getServerBaseUrl: _serverBaseUrl),
+          AccountScreen(
+            getServerBaseUrl: _serverBaseUrl,
+            onSessionChanged: () => setState(() {}),
+          ),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (i) => setState(() => _index = i),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.monitor_weight_outlined),
+            selectedIcon: Icon(Icons.monitor_weight),
+            label: 'Scale',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.checklist_outlined),
+            selectedIcon: Icon(Icons.checklist),
+            label: 'Count',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.edit_note_outlined),
+            selectedIcon: Icon(Icons.edit_note),
+            label: 'Log',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.liquor_outlined),
+            selectedIcon: Icon(Icons.liquor),
+            label: 'Inventory',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'Account',
+          ),
+        ],
       ),
     );
   }

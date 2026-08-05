@@ -5,8 +5,13 @@ const DEMO_BUSINESS = 'demo-bar';
 const INVENTORY = 'demo_inventory';
 const EVENTS = 'demo_events';
 const META = 'demo_meta';
-export const DEMO_DEVICE_SERIALS = ['SB_B017B2215788', 'SB_A40FB1215788'];
-export const DEMO_DEVICE_SERIAL = DEMO_DEVICE_SERIALS[0];
+// Demo status is a property of the device *record* (`devices.demo === true`),
+// set explicitly at provisioning via PATCH /api/platform/devices/:id/demo.
+//
+// It used to be inferred from this hardcoded serial allow-list, which meant
+// device login force-reassigned those two units to the demo business on every
+// login — silently reverting a real business assignment if either physical
+// unit was ever deployed to a pilot bar.
 
 const money = (n: number) => Math.round(n * 100) / 100;
 const daysAgo = (days: number) => {

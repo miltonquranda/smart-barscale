@@ -18,11 +18,17 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
-// Add a response interceptor to handle auth errors
+// Add a response interceptor to handle auth errors.
+//
+// Only a 401 means "your session is invalid". A 403 means "you are logged in
+// but not allowed to do this" — for example an admin-only route, or a business
+// scope the user doesn't own. Treating 403 as a session failure used to log
+// users out in a loop: the dashboard would 403, clear the token, redirect to
+// login, and repeat. Authorisation failures are surfaced to the caller instead.
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+        if (error.response && error.response.status === 401) {
             localStorage.removeItem('token');
             localStorage.removeItem('user');
             if (window.location.pathname !== '/login') {

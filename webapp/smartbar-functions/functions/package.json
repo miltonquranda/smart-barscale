@@ -2,11 +2,15 @@
     "name": "functions",
     "scripts": {
         "build": "tsc",
+        "test": "npm run build && node test/shift.test.js && node test/dashboard.test.js && node test/dashboard.edge.test.js && node test/auth.test.js && node test/backfill.test.js && node test/dedupe.test.js",
+        "backfill:specs": "npm run build && node lib/scripts/backfill_bottle_specs.js",
         "serve": "npm run build && firebase emulators:start --only functions",
         "shell": "npm run build && firebase functions:shell",
         "start": "npm run shell",
         "deploy": "firebase deploy --only functions",
-        "logs": "firebase functions:log"
+        "logs": "firebase functions:log",
+        "audit:duplicates": "npm run build && node lib/scripts/dedupe_catalog.js",
+        "dedupe:catalog": "npm run build && node lib/scripts/dedupe_catalog.js --merge"
     },
     "engines": {
         "node": "22"

@@ -1,6 +1,5 @@
-import * as dotenv from "dotenv";
-import * as jwt from "jsonwebtoken";
 import * as bcrypt from "bcryptjs";
+import { signUserToken, signPasswordResetToken } from "../auth";
 import { db } from '../firebase';
 import BaseCtrl from "./base";
 import StripeCtrl from "./stripe";
@@ -13,21 +12,26 @@ export default class UserCtrl extends BaseCtrl {
 
   login = async (req, res) => {
     try {
-      console.log(`Attempting login for ${req.body.email}`);
-      const snapshot = await db.collection(this.collectionName).where('email', '==', req.body.email).limit(1).get();
+      const email = String(req.body.email || '').trim().toLowerCase();
+      const snapshot = await db.collection(this.collectionName).where('email', '==', email).limit(1).get();
+
+      // Same message and rough timing for "no such user" and "wrong password",
+      // so the endpoint can't be used to enumerate valid email addresses.
+      const invalid = () => res.status(401).json({ error: 'Invalid email or password.' });
+
       if (snapshot.empty) {
-        console.log('User not found in database');
-        return res.status(403).json({ error: 'User not found' });
+        await bcrypt.compare(req.body.password || '', '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv');
+        return invalid();
       }
 
       const doc = snapshot.docs[0];
       const user: any = { _id: doc.id, ...doc.data() };
-      console.log('User found:', user.email, 'Hash:', user.password);
 
-      const isMatch = await bcrypt.compare(req.body.password, user.password);
-      if (!isMatch) {
-        console.log('Password mismatch');
-        return res.status(403).json({ error: 'Invalid password' });
+      const isMatch = await bcrypt.compare(req.body.password || '', user.password || '');
+      if (!isMatch) return invalid();
+
+      if (user.status && user.status !== 'active') {
+        return res.status(403).json({ error: 'This account is not active. Contact an administrator.' });
       }
 
       // Populate business
@@ -40,13 +44,13 @@ export default class UserCtrl extends BaseCtrl {
         user.business = businesses;
       }
 
-      // Remove password from token payload
       delete user.password;
-      const token = jwt.sign({ user: user }, process.env.SECRET_TOKEN);
-      res.status(200).json({ token: token, user: user });
+      // The token carries only identifiers; the client gets the user object in
+      // the response body for display purposes.
+      res.status(200).json({ token: signUserToken(user), user });
     } catch (err) {
-      console.error(err);
-      res.sendStatus(403);
+      console.error('Login failed:', err);
+      res.status(500).json({ error: 'Login failed.' });
     }
   };
 
@@ -69,7 +73,7 @@ export default class UserCtrl extends BaseCtrl {
         user.business = businesses;
       }
 
-      const token = jwt.sign({ user: user }, process.env.SECRET_TOKEN, { expiresIn: "2h" });
+      const token = signPasswordResetToken(user);
       this.emailCtrl.passwordReset(email, token).then(emailRes => {
         res.status(200).json({ token, emailRes });
       });
@@ -80,8 +84,11 @@ export default class UserCtrl extends BaseCtrl {
   };
 
   passwordResetVerify = async (req, res) => {
-    if (req.user) {
-      const user = req.user;
+    // Only a token minted by passwordResetRequest is accepted here, so an
+    // ordinary session token cannot be used to change a password without
+    // knowing the current one.
+    if (req.passwordReset) {
+      const user = req.passwordReset;
       const salt = await bcrypt.genSalt(10);
       const hash = await bcrypt.hash(req.body.password, salt);
 
@@ -103,8 +110,7 @@ export default class UserCtrl extends BaseCtrl {
         }
 
         delete updatedUser.password;
-        const token = jwt.sign({ user: updatedUser }, process.env.SECRET_TOKEN);
-        res.status(200).json({ token });
+        res.status(200).json({ token: signUserToken(updatedUser) });
       } catch (err) {
         console.error(err);
         res.status(400).json({ error: err.message });
@@ -208,8 +214,7 @@ export default class UserCtrl extends BaseCtrl {
               this.stripeCtrl.subscription(id, token)
                 .then(() => {
                   delete user.password;
-                  const authToken = jwt.sign({ user: user }, process.env.SECRET_TOKEN as string);
-                  res.status(200).json({ token: authToken });
+                  res.status(200).json({ token: signUserToken(user) });
                 })
                 .catch(error => res.status(400).json({ error }));
             })

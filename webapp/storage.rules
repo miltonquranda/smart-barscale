@@ -1,0 +1,27 @@
+rules_version = '2';
+
+// SmartBar Cloud Storage security rules.
+//
+// Product images are uploaded through POST /api/product/:barcode/image, which
+// runs server-side with the Admin SDK and calls file.makePublic() so the image
+// can be shown in the dashboard and mobile app without a signed URL.
+//
+// Because the API marks those objects public individually, direct client access
+// is not needed and is denied here. This prevents anyone enumerating or writing
+// to the bucket directly.
+//
+// Note: makePublic() grants read on the *object* via its ACL, which is
+// independent of these rules — public product image URLs continue to work.
+// If you later need images to be private, remove the makePublic() call in
+// controllers/bottle.ts and serve signed URLs instead; changing this file
+// alone will not make already-public objects private.
+//
+// Deploy with: firebase deploy --only storage
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

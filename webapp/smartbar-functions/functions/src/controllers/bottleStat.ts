@@ -7,6 +7,9 @@ import DemoCtrl from './demo';
 const inventoryCtrl = new InventoryCtrl();
 const demoCtrl = new DemoCtrl();
 
+/** A device is a demo unit only if its record says so. */
+const isDemoDevice = (req: any) => req.device?.demo === true;
+
 export default class BottleStatCtrl extends BaseCtrl {
   collectionName = 'bottle-stats';
 
@@ -39,8 +42,22 @@ export default class BottleStatCtrl extends BaseCtrl {
 
       let query = db.collection(this.collectionName).where('business', '==', req.user.business[0]._id || req.user.business[0]);
 
+      // `date` is stored as an ISO-8601 string (set in insert()). Lexical
+      // comparison is correct for that format, but only if both bounds are
+      // normalised to full ISO strings — comparing "2026-08-05" against
+      // "2026-08-05T13:22:00.000Z" would exclude everything on the final day.
       if (req.query.start && req.query.end) {
-        query = query.where('date', '>', req.query.start).where('date', '<', req.query.end);
+        const toIso = (value: string, endOfDay: boolean) => {
+          const raw = String(value);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            return endOfDay ? `${raw}T23:59:59.999Z` : `${raw}T00:00:00.000Z`;
+          }
+          const parsed = new Date(raw);
+          return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString();
+        };
+        query = query
+          .where('date', '>=', toIso(req.query.start, false))
+          .where('date', '<=', toIso(req.query.end, true));
       }
 
       const snapshot = await query.get();
@@ -75,12 +92,16 @@ export default class BottleStatCtrl extends BaseCtrl {
           : (req.device?.business || null);
         const stat: any = { ...req.body };
         if (business) stat.business = business;
-        if (req.device?.demo || req.device?.business === 'demo-bar') {
+        // Demo mirroring is driven by an explicit flag on the device record,
+        // set at provisioning. It used to also trigger on
+        // `business === 'demo-bar'`, which meant a real device could be pulled
+        // into the demo dataset by an accidental business assignment.
+        if (isDemoDevice(req)) {
           await demoCtrl.recordDeviceScan(barcode, parseFloat(req.body.weight) || 0, result.bottleId);
         }
         await this.addBottleStat(stat, res);
       } else {
-        if (req.device?.demo || req.device?.business === 'demo-bar') {
+        if (isDemoDevice(req)) {
           const scan = await demoCtrl.recordUnknownDeviceScan(barcode, parseFloat(req.body.weight) || 0);
           return res.status(201).json({ ...scan, message: 'Barcode recorded for Demo Bar; product needs to be added.' });
         }

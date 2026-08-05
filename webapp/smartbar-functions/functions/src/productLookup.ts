@@ -2,7 +2,12 @@ import axios from 'axios';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 
-const GEMINI_KEY = 'AIzaSyDOj7aSROml8Pk5eMndB3sXAN-rQ1aRX4M';
+// Server-side only. Never expose this to the web or mobile clients — barcode
+// enrichment must stay behind the API so the key is not shipped in a bundle.
+//
+// Read lazily: `dotenv.config()` runs in index.ts *after* the import graph is
+// evaluated, so a module-level read would always see undefined.
+const geminiKey = () => process.env.GEMINI_API_KEY || '';
 
 export interface ProductData {
   barcode: string;
@@ -110,9 +115,14 @@ async function fetchFromOpenFoodFacts(barcode: string): Promise<ProductData | nu
 }
 
 async function fetchFromGemini(barcode: string): Promise<ProductData | null> {
+  const key = geminiKey();
+  if (!key) {
+    console.error('Gemini lookup skipped: GEMINI_API_KEY is not configured.');
+    return null;
+  }
   try {
     const resp = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
       {
         contents: [{
           parts: [{

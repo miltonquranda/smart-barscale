@@ -1,0 +1,23 @@
+rules_version = '2';
+
+// SmartBar Firestore security rules.
+//
+// This project has NO client-side Firestore access. The React dashboard, the
+// Flutter app and the ESP32 firmware all reach data exclusively through the
+// Express API running in Cloud Functions, which uses the Admin SDK. The Admin
+// SDK bypasses these rules entirely, so denying everything here costs nothing
+// operationally and closes direct database access completely.
+//
+// If a client ever needs direct Firestore access (offline sync, real-time
+// listeners), do NOT loosen this file globally. Add a narrowly scoped rule for
+// that one collection, keyed on request.auth.uid, and note here why.
+//
+// Deploy with: firebase deploy --only firestore:rules
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
