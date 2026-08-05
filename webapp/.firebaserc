@@ -5,9 +5,6 @@
       "hosting": {
         "app": [
           "smartbar-7418f"
-        ],
-        "landing": [
-          "smartbar-landing"
         ]
       }
     }
