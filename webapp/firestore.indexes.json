@@ -1,0 +1,118 @@
+{
+  "//": "Composite indexes for every multi-field query in smartbar-functions. Firestore auto-indexes single fields, so only compound / range+order queries appear here. Missing any of these raises FAILED_PRECONDITION at runtime, not at deploy. Deploy with: firebase deploy --only firestore:indexes",
+  "indexes": [
+    {
+      "//": "inventory.createReading — previous reading lookup. On the device scan hot path: a miss here breaks every POST /api/bottle-stats.",
+      "collectionGroup": "inventory_readings",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "business", "order": "ASCENDING" },
+        { "fieldPath": "barcode", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "inventory.getReadings — default listing, newest first.",
+      "collectionGroup": "inventory_readings",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "business", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "dashboard.get — windowed range scan, oldest first so consecutive readings can be differenced.",
+      "collectionGroup": "inventory_readings",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "business", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "inventory.getReadings filtered by session.",
+      "collectionGroup": "inventory_readings",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "session_id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "inventory.getSessions — all sessions for a business.",
+      "collectionGroup": "inventory_sessions",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "business", "order": "ASCENDING" },
+        { "fieldPath": "started_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "inventory.getSessions — filtered by status, and createReading's active-session lookup.",
+      "collectionGroup": "inventory_sessions",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "business", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "started_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "inventory.getEvents — event feed, newest first.",
+      "collectionGroup": "inventory_events",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "business", "order": "ASCENDING" },
+        { "fieldPath": "logged_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "generateReport and dashboard.get — events by date range (date is a YYYY-MM-DD string).",
+      "collectionGroup": "inventory_events",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "business", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "inventory.getReports — saved consumption reports.",
+      "collectionGroup": "consumption_reports",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "business", "order": "ASCENDING" },
+        { "fieldPath": "generated_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "bottleStat.getAllInBusiness — optional date-range filter on an ISO string.",
+      "collectionGroup": "bottle-stats",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "business", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "inventory.getReadings — optional newest-first listing.",
+      "collectionGroup": "inventory_readings",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ALL",
+      "fields": [
+        { "fieldPath": "business", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
