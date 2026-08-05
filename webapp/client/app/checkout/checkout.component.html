@@ -1,0 +1,13 @@
+<form #checkout="ngForm" (ngSubmit)="onSubmit(checkout)" class="checkout">
+  <div class='form-row'>
+    $100 + $60/month
+  </div>
+  <div class="form-row">
+    <label for="card-info">Card Info</label>
+    <div id="card-info" #cardInfo></div>
+
+    <div id="card-errors" role="alert" *ngIf="error">{{ error }}</div>
+  </div>
+
+  <button type="submit">register</button>
+</form>

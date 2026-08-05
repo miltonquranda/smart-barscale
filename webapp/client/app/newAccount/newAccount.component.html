@@ -1,0 +1,110 @@
+<app-toast [message]="toast.message"></app-toast>
+<div class="row">
+  <div class="col-md-12">
+    <form [formGroup]="registerForm" (ngSubmit)="register()">
+      <h4>User Information</h4>
+      <hr />
+      <div class="input-group">
+        <div class="input-group-prepend">
+          <span class="input-group-text">
+            <i class="fa fa-user"></i>
+          </span>
+        </div>
+        <input
+          class="form-control"
+          type="text"
+          name="firstName"
+          formControlName="firstName"
+          placeholder="First Name"
+          autofocus
+        />
+        <input
+          class="form-control"
+          type="text"
+          name="lastName"
+          formControlName="lastName"
+          placeholder="Last Name"
+          autofocus
+        />
+      </div>
+      <div class="input-group" [ngClass]="setClassEmail()">
+        <div class="input-group-prepend">
+          <span class="input-group-text">
+            <i class="fa fa-envelope"></i>
+          </span>
+        </div>
+        <input
+          class="form-control"
+          type="email"
+          name="email"
+          formControlName="email"
+          placeholder="Email"
+        />
+      </div>
+      <div class="input-group" [ngClass]="setClassPassword()">
+        <div class="input-group-prepend">
+          <span class="input-group-text">
+            <i class="fa fa-key"></i>
+          </span>
+        </div>
+        <input
+          class="form-control"
+          type="password"
+          name="password"
+          formControlName="password"
+          placeholder="Password"
+        />
+      </div>
+      <div class="input-group" [ngClass]="setClassPassword()">
+        <div class="input-group-prepend">
+          <span class="input-group-text">
+            <i class="fa fa-key"></i>
+          </span>
+        </div>
+        <input
+          class="form-control"
+          type="password"
+          name="confirmPassword"
+          formControlName="confirmPassword"
+          placeholder="Confirm Password"
+        />
+      </div>
+
+      <h4>Business Information</h4>
+      <hr />
+      <div class="input-group">
+        <div class="input-group-prepend">
+          <span class="input-group-text">
+            <i class="fa fa-building"></i>
+          </span>
+        </div>
+        <input
+          class="form-control"
+          type="text"
+          name="businessName"
+          formControlName="businessName"
+          placeholder="Business Name"
+        />
+      </div>
+
+      <div class="input-group">
+        <div class="input-group-prepend">
+          <span class="input-group-text">
+            <i class="fa fa-map-marker"></i>
+          </span>
+        </div>
+        <input
+          class="form-control"
+          type="text"
+          name="businessZipCode"
+          formControlName="businessZipCode"
+          placeholder="Business Zip Code"
+        />
+      </div>
+      <button class="btn btn-primary" type="submit">
+        <i class="fa fa-save"></i>
+        Save
+      </button>
+    </form>
+  </div>
+</div>

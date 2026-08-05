@@ -1,0 +1,45 @@
+<app-loading [condition]="isLoading"></app-loading>
+
+<app-toast [message]="toast.message"></app-toast>
+
+<div class="card" *ngIf="!isLoading">
+  <h4 class="card-header">Registered Businesses ({{businesses.length}})</h4>
+  <div class="card-body">
+    <table class="table table-bordered">
+      <thead class="thead-light">
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Zip Code</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody *ngIf="businesses.length === 0">
+        <tr>
+          <td colspan="4">There are no registered users.</td>
+        </tr>
+      </tbody>
+      <tbody>
+        <tr *ngFor="let b of businesses">
+          <td>{{b.name}}</td>
+          <td>{{b.zipCode}}</td>
+          <td>
+            <div class="btn-group" role="group" aria-label="Basic example">
+              <button class="btn btn-sm btn-danger" (click)="deleteBusiness(b)">
+                <i class="fa fa-trash"></i> Delete
+              </button>
+              <a
+                routerLink="/admin/businesses/{{b._id}}"
+                class="btn btn-sm btn-primary"
+                routerLinkActive="active"
+              >
+                <i class="fa fa-pencil"></i> Edit
+              </a>
+
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+

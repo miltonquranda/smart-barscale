@@ -1,0 +1,93 @@
+<app-loading [condition]="isLoading"></app-loading>
+
+<app-toast [message]="toast.message"></app-toast>
+
+<div class="card mb-6" *ngIf="!isLoading">
+  <h4 class="card-header">Edit User</h4>
+  <div class="card-body">
+    <form #accountForm="ngForm" (ngSubmit)="save(user)">
+      <div class="input-group">
+        <input
+          class="form-control"
+          type="text"
+          name="firstName"
+          [(ngModel)]="user.firstName"
+          placeholder="First Name"
+          required
+        />
+        <input
+          class="form-control"
+          type="text"
+          name="lastName"
+          [(ngModel)]="user.lastName"
+          placeholder="Last Name"
+          required
+        />
+      </div>
+      <div class="input-group">
+        <div class="input-group-prepend">
+          <span class="input-group-text">
+            <i class="fa fa-envelope"></i>
+          </span>
+        </div>
+        <input
+          class="form-control"
+          type="email"
+          name="email"
+          [(ngModel)]="user.email"
+          placeholder="Email"
+          required
+        />
+      </div>
+      <div class="input-group">
+        <div class="input-group-prepend mr-3">
+          <span class="input-group-text">
+            <i class="fa fa-briefcase"></i>
+          </span>
+        </div>
+        <button type="button" class="btn btn-light"  *ngFor="let b of user.business">
+          {{ b.name }}
+          <button class="ml-3 badge badge-light btn btn-outline-danger" (click)="removeBusiness(b)">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </button>
+      </div>
+      <button
+        class="btn btn-primary"
+        type="submit"
+        [disabled]="!accountForm.form.valid"
+      >
+        <i class="fa fa-save"></i>
+        Save
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h4 class="card-header">Related Businesses</h4>
+  <div class="card-body">
+    <input
+      class="form-control"
+      type="text"
+      name="business"
+      [(ngModel)]="businessName"
+      (keydown)="search(businessName)"
+      placeholder="Business"
+      required
+    />
+    <div *ngFor="let b of businesses">
+      <div class="input-group">
+        <div class="input-group-prepend">
+          <span class="input-group-text">
+            {{ b.name }}
+          </span>
+        </div>
+        <button class="btn btn-success" (click)="assignUserToBusiness(b)">
+          <i class="fa fa-plus"></i>
+          Assign to business
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

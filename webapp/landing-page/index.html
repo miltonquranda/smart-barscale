@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMARTBAR - Intelligence Platform for Modern Bars</title>
+    <link rel="icon" type="image/png" href="favicon.png">
+    
+    <!-- Fonts: Manrope for Display, Inter for Body as per DESIGN.md -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            /* Colors from DESIGN.md */
+            --bg-base: #0f131f;
+            --surface-lowest: #0a0e1a;
+            --surface-low: #171b28;
+            --surface: #1b1f2c;
+            --surface-highest: #313442;
+            
+            --primary: #c3f5ff; /* Tech Cyan */
+            --primary-accent: #00e5ff;
+            --primary-container: rgba(0, 229, 255, 0.2);
+            
+            --secondary: #e9c176; /* Craft Gold */
+            --secondary-dark: #b89552;
+            
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.7);
+            
+            --blur: 20px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Ambient glows for the dark premium feel */
+        .ambient-glow {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(120px);
+            z-index: -1;
+            opacity: 0.15;
+            pointer-events: none;
+        }
+
+        .glow-gold { background: var(--secondary); width: 800px; height: 800px; top: -300px; right: -300px; }
+        .glow-cyan { background: var(--primary-accent); width: 600px; height: 600px; top: 30%; left: -200px; opacity: 0.1; }
+
+        /* Typography */
+        .kicker {
+            color: var(--secondary);
+            font-family: 'Manrope', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.25em;
+            margin-bottom: 1rem;
+            display: inline-block;
+            position: relative;
+            padding-left: 2rem;
+        }
+        
+        .kicker::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 1.2rem;
+            height: 2px;
+            background: var(--secondary);
+        }
+
+        .headline-hero {
+            font-size: clamp(3.5rem, 5.5vw, 6.5rem);
+            font-weight: 800;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+        }
+
+        .headline-hero span {
+            color: var(--secondary);
+            font-style: italic;
+            font-weight: 400;
+            padding-right: 0.5rem;
+        }
+
+        .hero-desc {
+            font-size: 1.15rem;
+            color: var(--text-secondary);
+            max-width: 550px;
+            margin-bottom: 2.5rem;
+            font-weight: 300;
+            line-height: 1.7;
+        }
+
+        /* Buttons */
+        .btn-container {
+            display: flex;
+            gap: 1.25rem;
+            align-items: center;
+            position: relative;
+            z-index: 10;
+            margin-top: 2rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--secondary), var(--secondary-dark));
+            color: #000;
+            font-family: 'Manrope', sans-serif;
+            font-weight: 800;
+            font-size: 0.95rem;
+            padding: 1.1rem 2.5rem;
+            border-radius: 4px;
+            text-decoration: none;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            letter-spacing: 0.05em;
+            display: inline-block;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(233, 193, 118, 0.2);
+        }
+
+        .btn-secondary {
+            background: rgba(49, 52, 66, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(var(--blur));
+            color: var(--text-primary);
+            font-family: 'Manrope', sans-serif;
+            font-weight: 800;
+            padding: 1.1rem 2.8rem;
+            border-radius: 4px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            transition: background 0.3s ease;
+            font-size: 0.85rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .btn-secondary i { color: var(--secondary); }
+        .btn-secondary:hover { background: rgba(49, 52, 66, 0.7); }
+
+        /* Layout */
+        .site-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 100;
+        }
+
+        .container {
+            max-width: 1250px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            position: relative;
+            z-index: 10;
+        }
+
+        nav {
+            padding: 1.5rem 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+        }
+
+        .logo img {
+            height: 100px;
+            width: auto;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            transition: color 0.3s ease;
+            text-transform: uppercase;
+        }
+
+        .nav-links a:hover { color: var(--secondary); }
+
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+        }
+
+        .nav-login {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            transition: color 0.3s;
+            text-transform: uppercase;
+        }
+        
+        .nav-login:hover {
+            color: var(--secondary);
+        }
+
+        .nav-btn {
+            background: linear-gradient(135deg, var(--secondary), var(--secondary-dark));
+            color: #000;
+            padding: 0.8rem 1.8rem;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            transition: transform 0.3s, box-shadow 0.3s;
+            text-transform: uppercase;
+        }
+        
+        .nav-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(233,193,118,0.2);
+        }
+
+        /* Hero Section */
+        .hero {
+            position: relative;
+            padding: 12rem 0 10rem;
+            display: flex;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .hero-bg {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 0;
+        }
+
+        .hero-bg img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.3;
+            mix-blend-mode: luminosity;
+            filter: contrast(1.1) brightness(0.8);
+            transform: scale(1.05);
+            animation: slowZoom 20s ease-in-out infinite alternate;
+        }
+        
+        @keyframes slowZoom {
+            0% { transform: scale(1); }
+            100% { transform: scale(1.1); }
+        }
+
+        .hero-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(90deg, var(--bg-base) 0%, rgba(15,19,31,0.6) 40%, transparent 100%),
+                        linear-gradient(0deg, var(--bg-base) 0%, transparent 30%),
+                        linear-gradient(180deg, var(--bg-base) 0%, transparent 20%);
+        }
+
+        .hero-content-grid {
+            position: relative;
+            z-index: 10;
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 4rem;
+            align-items: center;
+            width: 100%;
+        }
+
+        .hero-text-content {
+            padding-top: 4rem;
+        }
+
+        .hero-stats-container {
+            position: relative;
+            height: 400px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .floating-stat {
+            position: absolute;
+            background: rgba(22, 25, 35, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            padding: 1.25rem 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+            z-index: 20;
+            animation: float 6s ease-in-out infinite;
+            min-width: max-content;
+        }
+        
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-12px); }
+            100% { transform: translateY(0px); }
+        }
+
+        .floating-stat-icon {
+            width: 44px;
+            height: 44px;
+            background: rgba(0, 229, 255, 0.08);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary-accent);
+        }
+        
+        .floating-stat-icon svg {
+            width: 22px;
+            height: 22px;
+        }
+
+        .floating-stat-data h4 {
+            font-size: 0.65rem;
+            color: rgba(255, 255, 255, 0.6);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 0.25rem;
+            font-weight: 600;
+        }
+
+        .floating-stat-data .value {
+            font-size: 1.4rem;
+            color: var(--primary-accent);
+            font-weight: 800;
+            font-family: 'Manrope', sans-serif;
+            letter-spacing: -0.01em;
+            line-height: 1;
+        }
+
+        /* Process Flow Section */
+        .process-section {
+            background-color: var(--surface-lowest);
+            padding: 10rem 0;
+            position: relative;
+            z-index: 2;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 7rem;
+        }
+
+        .section-title {
+            font-size: 3rem;
+            color: var(--text-primary);
+            font-weight: 800;
+        }
+
+        .section-title::after {
+            content: '';
+            display: block;
+            width: 60px;
+            height: 2px;
+            background: var(--secondary);
+            margin: 1.5rem auto 0;
+        }
+
+        .process-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4rem;
+            text-align: center;
+        }
+
+        .process-step {
+            position: relative;
+            background: rgba(27, 31, 44, 0.4);
+            padding: 3rem 2rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.02);
+            transition: transform 0.3s, background 0.3s;
+        }
+
+        .process-step:hover {
+            transform: translateY(-5px);
+            background: rgba(27, 31, 44, 0.8);
+            border-color: rgba(233,193,118,0.2);
+        }
+
+        .process-step::after {
+            content: '';
+            position: absolute;
+            top: 4rem;
+            right: -2rem;
+            width: 4rem;
+            height: 1px;
+            background: linear-gradient(90deg, rgba(233,193,118,0.4), transparent);
+            z-index: 1;
+        }
+
+        .process-step:last-child::after { display: none; }
+
+        .step-icon-wrapper {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 2.5rem;
+            background: var(--surface);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2;
+            border: 1px solid rgba(233,193,118,0.2);
+            box-shadow: 0 0 30px rgba(233,193,118,0.1);
+        }
+
+        .step-number {
+            position: absolute;
+            top: -12px;
+            right: -12px;
+            color: var(--secondary);
+            font-family: 'Manrope', sans-serif;
+            font-weight: 800;
+            font-size: 0.9rem;
+            background: var(--bg-base);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .step-icon {
+            color: var(--secondary);
+        }
+
+        .step-title {
+            font-size: 1.4rem;
+            margin-bottom: 1rem;
+            font-weight: 800;
+        }
+
+        .step-desc {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            max-width: 280px;
+            margin: 0 auto;
+            line-height: 1.7;
+        }
+
+        /* Dashboard Preview Section (Asymmetrical layout) */
+        .dashboard-preview {
+            padding: 15rem 0;
+            display: grid;
+            grid-template-columns: 4fr 6fr;
+            gap: 7rem;
+            align-items: center;
+            position: relative;
+        }
+
+        .dashboard-preview::before {
+            content: '';
+            position: absolute;
+            left: -30%;
+            top: 10%;
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle at center, rgba(0,229,255,0.08), transparent 70%);
+            border-radius: 50%;
+            z-index: -1;
+            pointer-events: none;
+            filter: blur(50px);
+        }
+
+        .dashboard-content h2 {
+            font-size: 3.5rem;
+            margin-bottom: 2rem;
+            line-height: 1.1;
+        }
+        
+        .dashboard-content h2 span {
+            color: var(--secondary);
+            font-style: italic;
+            font-weight: 400;
+        }
+
+        .dashboard-content p {
+            color: var(--text-secondary);
+            margin-bottom: 3.5rem;
+            font-size: 1.15rem;
+            line-height: 1.8;
+            font-weight: 300;
+        }
+
+        .insight-card {
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            border-left: 3px solid transparent;
+            transition: transform 0.3s, box-shadow 0.3s;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .insight-card:hover {
+            transform: translateX(10px);
+        }
+
+        .insight-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; bottom: 0; width: 3px;
+        }
+
+        .insight-card.active::before { background: var(--primary-accent); box-shadow: 0 0 15px var(--primary-accent); }
+        .insight-card.gold::before { background: var(--secondary); box-shadow: 0 0 15px var(--secondary); }
+
+        .insight-title {
+            font-family: 'Manrope', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 0.75rem;
+        }
+        
+        .insight-card.active .insight-title { color: var(--primary-accent); }
+        .insight-card.gold .insight-title { color: var(--secondary); }
+
+        .insight-desc {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        /* Abstract UI Elements */
+        .ui-mockup {
+            position: relative;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+
+        .ui-card {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 2.5rem;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.02);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .ui-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+        }
+
+        .ui-card.wide { grid-column: 1 / -1; }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2.5rem;
+            align-items: center;
+        }
+
+        .chart-title { font-size: 1.1rem; font-family: 'Manrope', sans-serif; font-weight: 700; }
+
+        .chart-bars {
+            display: flex;
+            align-items: flex-end;
+            gap: 20px;
+            height: 140px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            padding-bottom: 5px;
+        }
+
+        .bar {
+            flex: 1;
+            background: linear-gradient(to top, rgba(233, 193, 118, 0.1), var(--secondary));
+            border-radius: 4px 4px 0 0;
+            opacity: 0.7;
+            transition: opacity 0.3s, transform 0.3s;
+            position: relative;
+        }
+        
+        .bar::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 4px;
+            background: rgba(255,255,255,0.8);
+            border-radius: 4px 4px 0 0;
+        }
+
+        .bar:hover { opacity: 1; transform: scaleY(1.05); transform-origin: bottom; }
+
+        /* Alert List */
+        .alert-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        
+        .alert-item {
+            display: flex;
+            justify-content: space-between;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.95rem;
+            align-items: center;
+        }
+
+        .alert-item:last-child { border-bottom: none; padding-bottom: 0; }
+        .alert-label { color: var(--text-secondary); font-weight: 500; }
+        .alert-value { font-size: 0.75rem; font-weight: 800; letter-spacing: 0.1em; }
+        .alert-value.critical { color: #ff5252; background: rgba(255,82,82,0.1); padding: 4px 8px; border-radius: 4px;}
+        .alert-value.warning { color: var(--secondary); background: rgba(233, 193, 118, 0.1); padding: 4px 8px; border-radius: 4px; }
+
+        /* ROI Section */
+        .roi-section {
+            background-color: var(--surface-lowest);
+            padding: 12rem 0;
+            border-top: 1px solid rgba(255,255,255,0.02);
+            border-bottom: 1px solid rgba(255,255,255,0.02);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .roi-section::after {
+            content: '';
+            position: absolute;
+            top: 0; right: 0; width: 40%; height: 100%;
+            background: radial-gradient(circle at center right, rgba(233,193,118,0.05), transparent 70%);
+            pointer-events: none;
+        }
+
+        .roi-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8rem;
+            align-items: center;
+        }
+
+        .roi-content h2 {
+            font-size: 3.5rem;
+            margin-bottom: 3.5rem;
+            line-height: 1.1;
+            letter-spacing: -0.02em;
+        }
+
+        .roi-content h2 span { color: var(--secondary); font-style: italic; font-weight: 400; }
+
+        .roi-feature {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 3.5rem;
+            align-items: flex-start;
+            position: relative;
+            padding-bottom: 2rem;
+        }
+        
+        .roi-feature:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            left: 24px;
+            bottom: 0;
+            height: 100%;
+            width: 1px;
+            background: linear-gradient(180deg, rgba(233,193,118,0.2), transparent);
+            z-index: 0;
+        }
+
+        .roi-icon {
+            color: var(--secondary);
+            background: rgba(233, 193, 118, 0.1);
+            padding: 12px;
+            border-radius: 8px;
+            display: flex;
+            position: relative;
+            z-index: 2;
+            border: 1px solid rgba(233,193,118,0.2);
+            box-shadow: 0 0 20px rgba(233,193,118,0.1);
+        }
+
+        .roi-text h3 {
+            font-size: 1.3rem;
+            margin-bottom: 0.75rem;
+            font-weight: 700;
+        }
+
+        .roi-text p {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            line-height: 1.6;
+        }
+
+        .calculator-card {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 4rem;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.4);
+            border: 1px solid rgba(255,255,255,0.03);
+            position: relative;
+        }
+        
+        .calculator-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 3px;
+            background: linear-gradient(90deg, var(--secondary), transparent);
+            border-radius: 12px 12px 0 0;
+        }
+
+        .calc-title {
+            text-align: center;
+            font-family: 'Manrope', sans-serif;
+            font-size: 1.4rem;
+            margin-bottom: 4rem;
+            font-weight: 800;
+        }
+
+        .calc-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 2.5rem;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 0.75rem;
+        }
+
+        .calc-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .calc-value {
+            font-family: 'Manrope', sans-serif;
+            font-weight: 800;
+            font-size: 1.25rem;
+            color: var(--primary-accent);
+        }
+
+        .calc-result {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-top: 4rem;
+            background: rgba(0,0,0,0.2);
+            padding: 2rem;
+            border-radius: 8px;
+            border: 1px solid rgba(233, 193, 118, 0.1);
+        }
+
+        .result-label {
+            font-size: 0.75rem;
+            color: var(--secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 0.5rem;
+            font-weight: 800;
+        }
+
+        .result-value {
+            font-family: 'Manrope', sans-serif;
+            font-size: 3rem;
+            font-weight: 800;
+            color: var(--text-primary);
+            line-height: 1;
+        }
+
+        .btn-calc {
+            background: linear-gradient(135deg, var(--secondary), var(--secondary-dark));
+            color: #000;
+            border: none;
+            padding: 1.2rem 2.5rem;
+            font-family: 'Manrope', sans-serif;
+            font-weight: 800;
+            font-size: 0.9rem;
+            letter-spacing: 0.05em;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+        
+        .btn-calc:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(233,193,118,0.2); }
+
+        /* Testimonials */
+        .testimonials {
+            padding: 12rem 0;
+            text-align: center;
+            position: relative;
+        }
+
+        .testimonials::before {
+            content: '';
+            position: absolute;
+            right: -20%;
+            top: 20%;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle at center, rgba(233,193,118,0.05), transparent 70%);
+            border-radius: 50%;
+            z-index: -1;
+            pointer-events: none;
+            filter: blur(50px);
+        }
+
+        .test-kicker {
+            font-size: 0.75rem;
+            letter-spacing: 0.25em;
+            text-transform: uppercase;
+            color: var(--secondary);
+            margin-bottom: 1.5rem;
+            font-weight: 700;
+        }
+        
+        .testimonials h2 {
+            font-size: 3rem;
+        }
+
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2.5rem;
+            margin-top: 5rem;
+            text-align: left;
+        }
+
+        .test-card {
+            background: var(--surface);
+            padding: 3rem 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            border: 1px solid rgba(255,255,255,0.02);
+            position: relative;
+        }
+
+        .stars { color: var(--secondary); margin-bottom: 2rem; letter-spacing: 4px; font-size: 1.2rem; }
+
+        .quote {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            font-style: italic;
+            margin-bottom: 3rem;
+            line-height: 1.8;
+            font-weight: 300;
+        }
+
+        .author {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+        }
+
+        .author-img {
+            width: 48px;
+            height: 48px;
+            background: var(--surface-highest);
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.1);
+        }
+
+        .author-info h4 { font-size: 1rem; margin-bottom: 0.2rem; }
+        .author-info p { font-size: 0.75rem; color: var(--secondary); text-transform: uppercase; letter-spacing: 0.1em; }
+
+        /* Footer CTA */
+        .cta-section {
+            padding: 6rem 0 10rem;
+            text-align: center;
+        }
+
+        .cta-box {
+            background: var(--surface-low);
+            padding: 8rem 2rem;
+            border-radius: 16px;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.03);
+            box-shadow: 0 40px 80px rgba(0,0,0,0.5);
+        }
+
+        .cta-box::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle at center, rgba(0,229,255,0.05) 0%, transparent 70%);
+        }
+
+        .cta-content { position: relative; z-index: 2; }
+        
+        .cta-content h2 {
+            font-size: 3.5rem;
+            color: var(--text-primary); 
+            margin-bottom: 1.5rem;
+            font-weight: 800;
+        }
+        
+        .cta-content p {
+            color: var(--text-secondary);
+            font-size: 1.15rem;
+            margin-bottom: 3.5rem;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            line-height: 1.6;
+        }
+
+        footer {
+            padding: 3rem 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .footer-links { display: flex; gap: 2.5rem; }
+        .footer-links a { color: var(--text-secondary); text-decoration: none; transition: color 0.3s; }
+        .footer-links a:hover { color: var(--secondary); }
+
+        /* SVGs */
+        svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+        
+        @media (max-width: 1024px) {
+            .hero { padding: 8rem 0 5rem; }
+            .hero-content-grid { grid-template-columns: 1fr; text-align: center; gap: 3rem; }
+            .hero-overlay {
+                background: linear-gradient(0deg, var(--bg-base) 0%, rgba(15,19,31,0.8) 60%, rgba(15,19,31,0.9) 100%);
+            }
+            .headline-hero { font-size: 3.5rem; }
+            .hero-desc { margin: 0 auto 3rem; }
+            .btn-container { justify-content: center; }
+            .hero-stats-container { height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: center; gap: 1rem; }
+            .floating-stat { position: relative !important; bottom: auto !important; top: auto !important; left: auto !important; right: auto !important; animation: none; transform: none; width: 100%; justify-content: center; }
+            
+            .process-grid { grid-template-columns: 1fr; gap: 4rem; }
+            .process-step::after { display: none; }
+            
+            .dashboard-preview { grid-template-columns: 1fr; }
+            .dashboard-content { text-align: center; }
+            
+            .roi-grid { grid-template-columns: 1fr; }
+            .roi-content { text-align: center; }
+            
+            .test-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="ambient-glow glow-gold"></div>
+    <div class="ambient-glow glow-cyan"></div>
+
+    <header class="site-header">
+        <div class="container">
+            <nav>
+                <a href="#" class="logo">
+                    <img src="smart_bar_logo_cropped.png" alt="SmartBar">
+                </a>
+                <div class="nav-links">
+                    <a href="#">How it works</a>
+                    <a href="#">Intelligence</a>
+                    <a href="#">Reports</a>
+                </div>
+                <div class="nav-actions">
+                    <a href="/login" class="nav-login">Login</a>
+                    <a href="#" class="nav-btn">Get Started</a>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <section class="hero">
+        <div class="hero-bg">
+            <!-- Using a high-end unsplash placeholder for the pouring whiskey -->
+            <img src="https://images.unsplash.com/photo-1527281400683-1aae777175f8?q=80&w=2000&auto=format&fit=crop" alt="Pouring Whiskey">
+            <div class="hero-overlay"></div>
+        </div>
+        
+        <div class="container hero-content-grid">
+            <div class="hero-text-content">
+                <span class="kicker">Pioneering the modern bar</span>
+                <h1 class="headline-hero">Experience<br><span>Inventory</span><br>Mastery</h1>
+                <p class="hero-desc">
+                    Eliminate variance and reclaim your margin with the AI-powered intelligence platform designed for elite hospitality venues. Transform manual counts into instant digital insights.
+                </p>
+                <div class="btn-container">
+                    <a href="#" class="btn-primary">GET STARTED</a>
+                    <a href="#" class="btn-secondary">
+                        <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                        WATCH A DEMO
+                    </a>
+                </div>
+            </div>
+            
+            <div class="hero-stats-container">
+                <div class="floating-stat" style="bottom: 40px; left: -20px;">
+                    <div class="floating-stat-icon">
+                        <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+                    </div>
+                    <div class="floating-stat-data">
+                        <h4>Real-Time Accuracy</h4>
+                        <div class="value">99.9%</div>
+                    </div>
+                </div>
+                
+                <div class="floating-stat" style="bottom: auto; top: 40px; left: auto; right: -20px; animation-delay: -3s; animation-duration: 7s;">
+                    <div class="floating-stat-icon" style="background: rgba(233, 193, 118, 0.1); color: var(--secondary);">
+                        <svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+                    </div>
+                    <div class="floating-stat-data">
+                        <h4>Margin Increase</h4>
+                        <div class="value" style="color: var(--secondary);">+12%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="process-section">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Precision in Motion</h2>
+            </div>
+            <div class="process-grid">
+                <div class="process-step">
+                    <div class="step-icon-wrapper">
+                        <span class="step-number">01</span>
+                        <svg class="step-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="8" y1="12" x2="16" y2="12"></line><line x1="12" y1="8" x2="12" y2="16"></line></svg>
+                    </div>
+                    <h3 class="step-title">Scan the bottle</h3>
+                    <p class="step-desc">Instantly identify any spirit or wine from our global database of 50,000+ items.</p>
+                </div>
+                <div class="process-step">
+                    <div class="step-icon-wrapper">
+                        <span class="step-number">02</span>
+                        <svg class="step-icon" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                    </div>
+                    <h3 class="step-title">Place on scale</h3>
+                    <p class="step-desc">Our smart hardware reads within 0.5g precision in under a second.</p>
+                </div>
+                <div class="process-step">
+                    <div class="step-icon-wrapper">
+                        <span class="step-number">03</span>
+                        <svg class="step-icon" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                    </div>
+                    <h3 class="step-title">View instant data</h3>
+                    <p class="step-desc">Automatic updates sync to cloud. If numbers drop, we catch it on the spot.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="container">
+        <section class="dashboard-preview">
+            <div class="dashboard-content">
+                <h2>Intelligence that<br>Pours <span>Profit</span></h2>
+                <p>Stop guessing and start optimizing. Our analytical dashboard gives you the clarity of a master sommelier combined with the precision of a data scientist.</p>
+                
+                <div class="insight-card active">
+                    <div class="insight-title">Volume Velocity</div>
+                    <div class="insight-desc">Hendrick's depleting 18% faster than normal for a Sunday shift.</div>
+                </div>
+                <div class="insight-card gold">
+                    <div class="insight-title">Profit Optimization</div>
+                    <div class="insight-desc">Maximize margins by adjusting your stock based on real-time cost data.</div>
+                </div>
+            </div>
+            
+            <div class="ui-mockup">
+                <div class="ui-card">
+                    <div class="chart-header">
+                        <span class="chart-title">Inventory Health</span>
+                        <svg style="width:16px;height:16px;color:var(--primary-accent)" viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+                    </div>
+                    <div class="chart-bars">
+                        <div class="bar" style="height: 40%"></div>
+                        <div class="bar" style="height: 70%"></div>
+                        <div class="bar" style="height: 50%"></div>
+                        <div class="bar" style="height: 100%"></div>
+                        <div class="bar" style="height: 60%"></div>
+                    </div>
+                </div>
+                
+                <div class="ui-card">
+                    <div class="chart-header">
+                        <span class="chart-title" style="color: #ff5252"><svg style="width:14px;height:14px;display:inline;margin-right:6px;" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg> Low Stock Alerts</span>
+                    </div>
+                    <div class="alert-list">
+                        <div class="alert-item">
+                            <span class="alert-label">Absolut Blue</span>
+                            <span class="alert-value critical">CRITICAL DEPLETION</span>
+                        </div>
+                        <div class="alert-item">
+                            <span class="alert-label">Hendrick's Gin</span>
+                            <span class="alert-value warning">ORDER PLACED</span>
+                        </div>
+                        <div class="alert-item">
+                            <span class="alert-label">Don Julio 1942</span>
+                            <span class="alert-value warning">MONITORING...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ui-card wide" style="display:flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div class="insight-title" style="color: var(--primary-accent)">Profit Optimization</div>
+                        <div style="font-size:0.9rem; color:var(--text-secondary)">Your signature cocktail "Midnight Old Fashioned" is currently performing 22% above target margin.</div>
+                    </div>
+                    <div style="font-size: 2rem; font-family: 'Manrope'; color: var(--primary-accent); font-weight: 700;">+22%<div style="font-size:0.6rem; letter-spacing:0.1em; color:var(--text-secondary); text-align:right;">PROJECTED ROI</div></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <section class="roi-section">
+        <div class="container roi-grid">
+            <div class="roi-content">
+                <h2>Stop pouring <span>money</span><br>down the drain</h2>
+                
+                <div class="roi-feature">
+                    <div class="roi-icon"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></div>
+                    <div class="roi-text">
+                        <h3>Identify Theft & Over-pouring</h3>
+                        <p>Our weighing system detects even a 1/4oz variance, identifying loose procedures in real-time.</p>
+                    </div>
+                </div>
+                <div class="roi-feature">
+                    <div class="roi-icon"><svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg></div>
+                    <div class="roi-text">
+                        <h3>Reduce Variance by 80%</h3>
+                        <p>Establish a culture of accountability. Venues using SMARTBAR see an average of 12% revenue increase.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="calculator-card">
+                <h3 class="calc-title">Calculate Your Potential Savings</h3>
+                
+                <div class="calc-row">
+                    <span class="calc-label">Monthly Beverage Sales</span>
+                    <span class="calc-value">$50,000</span>
+                </div>
+                <div class="calc-row">
+                    <span class="calc-label">Current Variance %</span>
+                    <span class="calc-value">15%</span>
+                </div>
+                
+                <div class="calc-result">
+                    <div>
+                        <div class="result-label">Annual Recovery*</div>
+                        <div class="result-value">$21,600</div>
+                    </div>
+                    <button class="btn-calc">START SAVING</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="container">
+        <section class="testimonials">
+            <div class="test-kicker">The Standard of Excellence</div>
+            <h2>Trusted by World-Class Venues</h2>
+            
+            <div class="test-grid">
+                <div class="test-card">
+                    <div class="stars">★★★★★</div>
+                    <p class="quote">"This precision is unlike anything we've used before. It has completely transformed our inventory process from an 8-hour nightmare to a 45-minute breeze."</p>
+                    <div class="author">
+                        <div class="author-img" style="background-image: url('https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=100&auto=format&fit=crop'); background-size: cover;"></div>
+                        <div class="author-info">
+                            <h4>Julian Vance</h4>
+                            <p>Director, The Monarch</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="test-card">
+                    <div class="stars">★★★★★</div>
+                    <p class="quote">"Accuracy was our primary concern. We tested SMARTBAR against manual counts and it was flawless every single time. A true game changer."</p>
+                    <div class="author">
+                        <div class="author-img" style="background-image: url('https://images.unsplash.com/photo-1560250097-0b93528c311a?q=80&w=100&auto=format&fit=crop'); background-size: cover;"></div>
+                        <div class="author-info">
+                            <h4>Marcus Thorne</h4>
+                            <p>Founder, Palette NYC</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="test-card">
+                    <div class="stars">★★★★★</div>
+                    <p class="quote">"The predictive ordering has saved us from being out of stock on high-demand nights. It's like having an extra manager dedicated to stock."</p>
+                    <div class="author">
+                        <div class="author-img" style="background-image: url('https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=100&auto=format&fit=crop'); background-size: cover;"></div>
+                        <div class="author-info">
+                            <h4>Elena Rossi</h4>
+                            <p>Beverage Dir, The Skyline</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="cta-section">
+            <div class="cta-box">
+                <div class="cta-content">
+                    <h2>Elevate Your Operation</h2>
+                    <p>Join the world's most innovative hospitality venues. Get early access to the SMARTBAR platform.</p>
+                    <div style="display:flex; justify-content:center; gap:1rem;">
+                        <input type="email" placeholder="Enter your email address" style="background:rgba(10, 14, 26, 0.8); border:1px solid rgba(255,255,255,0.1); padding:1.2rem 2rem; border-radius:4px; color:white; width: 350px; font-family: 'Inter', sans-serif; font-size:1rem; outline: none; transition: border-color 0.3s; z-index: 10; position: relative;">
+                        <button class="btn-primary" style="z-index: 10; position: relative;">REQUEST ACCESS</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <div class="logo">
+                <img src="smart_bar_logo_cropped.png" alt="SmartBar" style="height: 48px;">
+            </div>
+            <div class="footer-links">
+                <a href="#">About Us</a>
+                <a href="#">Contact</a>
+                <a href="#">Privacy Policy</a>
+                <a href="#">Terms of Service</a>
+                <a href="#">API Docs</a>
+            </div>
+            <div>© 2026 SMARTBAR Intelligence. All rights reserved.</div>
+        </footer>
+    </div>
+
+</body>
+</html>

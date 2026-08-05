@@ -1,0 +1,66 @@
+<app-loading [condition]="isLoading">
+</app-loading>
+
+<app-toast [message]="toast.message"></app-toast>
+
+<div class="card mb-3" *ngIf="!isLoading">
+    <h4 class="card-header">Current devices ({{devices.length}})</h4>
+    <div class="card-body">
+        <table class="table table-bordered">
+            <thead class="thead-light">
+                <tr>
+                    <th scope="col">serial number</th>
+                    <th scope="col">business</th>
+                    <th scope="col">type</th>
+                    <th scope="col">fullfillment status</th>
+                    <th scope="col">Actions</th>
+                </tr>
+            </thead>
+            <tbody *ngIf="devices.length === 0">
+                <tr>
+                    <td colspan="4">There are no bottleStats in the DB. Add a new bottleStat below.</td>
+                </tr>
+            </tbody>
+            <tbody *ngIf="!isEditing">
+                <tr *ngFor="let device of devices">
+                    <td>{{device.serialNumber}}</td>
+                    <td *ngIf='!!device.business'>
+                        {{device.business._id}}<br/> {{device.business.name}} {{device.business.zipCode}}
+                    </td>
+                    <td *ngIf='!device.business'>none</td>
+                    <td>{{device.type}}</td>
+                    <td>{{device.fullfilled}}</td>
+
+                    <td>
+                        <button class="btn btn-sm btn-primary" (click)="enableEditing(device)"><i class="fa fa-pencil"></i> Edit</button>
+                        <button class="btn btn-sm btn-danger ml-1" (click)="deleteDevice(device)"><i class="fa fa-trash"></i> Delete</button>
+                    </td>
+                </tr>
+            </tbody>
+            <tbody *ngIf="isEditing">
+                <tr>
+                    <td colspan="8">
+                        <form class="form-inline" #form="ngForm" (ngSubmit)="editDevice(device)">
+                            <input class="form-control mr-2" type="text" name="name" [(ngModel)]="device.serialNumber" placeholder="serial number" required>
+                            <input class="form-control mr-2" type="text" name="type" [(ngModel)]="device.type" placeholder="type" min="0" required>
+                            <input class="form-control mr-2" type="text" name="type" [(ngModel)]="device.fullfilled" placeholder="fullfilment status" min="0" required>
+                            <button class="btn btn-sm btn-primary mr-2" type="submit" [disabled]="!form.form.valid"><i class="fa fa-floppy-o"></i> Save</button>
+                            <button class="btn btn-sm btn-warning" (click)="cancelEditing()"><i class="fa fa-times"></i> Cancel</button>
+                        </form>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card" *ngIf="!isEditing">
+    <h4 class="card-header">Add new device</h4>
+    <div class="card-body">
+        <form class="form-inline" [formGroup]="addDeviceForm" (ngSubmit)="addDevice()">
+            <input class="form-control mr-2" type="text" name="serialNumber" formControlName="serialNumber" placeholder="serialNumber">
+            <input class="form-control mr-2" type="text" name="type" formControlName="type" placeholder="type">
+            <button class="btn btn-primary" type="submit" [disabled]="!addDeviceForm.valid"><i class="fa fa-plus"></i> Add</button>
+        </form>
+    </div>
+</div>

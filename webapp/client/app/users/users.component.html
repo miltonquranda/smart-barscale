@@ -1,0 +1,55 @@
+<app-loading [condition]="isLoading"></app-loading>
+
+<app-toast [message]="toast.message"></app-toast>
+
+<div class="card" *ngIf="!isLoading">
+  <h4 class="card-header">Registered users ({{users.length}})</h4>
+  <div class="card-body">
+    <table class="table table-bordered">
+      <thead class="thead-light">
+        <tr>
+          <th scope="col">Username</th>
+          <th scope="col">Email</th>
+          <th scope="col">Business</th>
+          <th scope="col">Role</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody *ngIf="users.length === 0">
+        <tr>
+          <td colspan="4">There are no registered users.</td>
+        </tr>
+      </tbody>
+      <tbody>
+        <tr *ngFor="let user of users">
+          <td>{{user.username}}</td>
+          <td>{{user.email}}</td>
+          <td>
+            <span *ngFor="let b of user.business">{{b.name}}</span>
+            <span *ngIf="!user.business.length">none</span>
+          </td>
+          <td>{{user.role}}</td>
+          <td>
+            <button class="btn btn-sm btn-danger" (click)="deleteUser(user)" [disabled]="auth.currentUser._id === user._id">
+              <i class="fa fa-trash"></i> Delete
+            </button>
+            <a
+                routerLink="/admin/users/{{user._id}}"
+                class="btn btn-sm btn-primary"
+                routerLinkActive="active"
+              >
+                <i class="fa fa-pencil"></i> Edit
+              </a>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="card" *ngIf="!isLoading">
+    <h4 class="card-header">Add new User and business</h4>
+    <div class="card-body">
+        <app-new-account></app-new-account>
+    </div>
+</div>
+

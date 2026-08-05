@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../out-tsc/app",
+    "module": "esNext",
+    "types": []
+  },
+  "exclude": [
+    "client/test.ts",
+    "**/*.spec.ts"
+  ]
+}
