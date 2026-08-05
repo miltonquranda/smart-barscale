@@ -9,6 +9,41 @@ const demoCtrl = new DemoCtrl();
 export default class BottleCtrl extends BaseCtrl {
   collectionName = 'bottles';
 
+  /**
+   * Return a bounded catalog page. The legacy /bottles endpoint intentionally
+   * remains unchanged for older clients; the Products page uses this cursor
+   * endpoint so a large catalog is never transferred in one response.
+   */
+  getPage = async (req, res) => {
+    try {
+      const requested = Number.parseInt(String(req.query.limit || '25'), 10);
+      const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 25, 1), 50);
+      const cursor = typeof req.query.cursor === 'string' && req.query.cursor.trim()
+        ? req.query.cursor.trim()
+        : null;
+
+      let query: FirebaseFirestore.Query = db.collection(this.collectionName)
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(limit + 1);
+      if (cursor) query = query.startAfter(cursor);
+
+      const snapshot = await query.get();
+      const hasMore = snapshot.docs.length > limit;
+      const pageDocs = snapshot.docs.slice(0, limit);
+      const products = pageDocs.map(doc => ({ _id: doc.id, ...doc.data() }));
+
+      res.status(200).json({
+        products,
+        nextCursor: hasMore ? pageDocs[pageDocs.length - 1].id : null,
+        hasMore,
+        limit,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
+    }
+  };
+
   getByBarcode = async (req, res) => {
     try {
       const barcode = req.params.barcode;
@@ -40,7 +75,9 @@ export default class BottleCtrl extends BaseCtrl {
       if (!barcode) return res.status(400).json({ error: 'Barcode is required' });
 
       const { name, brand, description, category, image_url, quantity,
-              weight, pour_price, pour_volume_ml, country_of_origin, ingredients, nutrition_per_100 } = req.body;
+              weight, pour_price, pour_volume_ml, country_of_origin, ingredients, nutrition_per_100,
+              bottle_full_weight_g, bottle_empty_weight_g, bottle_volume_ml,
+              cost_per_bottle, par_level } = req.body;
 
       if (!name) return res.status(400).json({ error: 'Product name is required' });
 
@@ -73,6 +110,28 @@ export default class BottleCtrl extends BaseCtrl {
         }
       }
 
+      // Physical specs. Without full weight, empty weight and volume the
+      // inventory engine cannot convert a scale reading into a liquid volume,
+      // so every derived figure — on-hand value, consumption, pour cost —
+      // silently comes out zero. These used to be dropped from the payload
+      // entirely, which is why real-data dashboards rendered empty.
+      const spec = (value: any) => {
+        const n = Number(value);
+        return Number.isFinite(n) && n >= 0 ? n : null;
+      };
+      const fullWeight = spec(bottle_full_weight_g);
+      const emptyWeight = spec(bottle_empty_weight_g);
+      const volumeMl = spec(bottle_volume_ml);
+
+      // A bottle cannot weigh less full than empty. Catching it here beats
+      // discovering it as a negative pour on the dashboard.
+      if (fullWeight !== null && emptyWeight !== null && fullWeight > 0 && emptyWeight > 0
+          && fullWeight <= emptyWeight) {
+        return res.status(400).json({
+          error: 'bottle_full_weight_g must be greater than bottle_empty_weight_g.',
+        });
+      }
+
       const productData: any = {
         barcode,
         name,
@@ -87,6 +146,11 @@ export default class BottleCtrl extends BaseCtrl {
         country_of_origin: country_of_origin || null,
         ingredients: ingredients || null,
         nutrition_per_100: nutrition,
+        bottle_full_weight_g: fullWeight,
+        bottle_empty_weight_g: emptyWeight,
+        bottle_volume_ml: volumeMl,
+        cost_per_bottle: spec(cost_per_bottle),
+        par_level: spec(par_level),
         source: 'manual',
         last_updated: admin.firestore.Timestamp.now(),
       };
@@ -95,12 +159,21 @@ export default class BottleCtrl extends BaseCtrl {
 
       if (!snapshot.empty) {
         const docId = snapshot.docs[0].id;
+        // Don't let a client that omits the spec fields (an older mobile build,
+        // say) wipe specs that were already set. Only overwrite what was sent.
+        const existing = snapshot.docs[0].data();
+        for (const key of ['bottle_full_weight_g', 'bottle_empty_weight_g', 'bottle_volume_ml', 'cost_per_bottle', 'par_level']) {
+          if (productData[key] === null && existing[key] != null) productData[key] = existing[key];
+        }
         await db.collection('bottles').doc(docId).update(productData);
-        await demoCtrl.claimUnknownScan(barcode, docId);
+        // Only resolve pending demo scans when the caller is actually working
+        // on a demo device. This previously ran for every product save in
+        // every tenant, writing into the demo collections unconditionally.
+        if (req.device?.demo === true) await demoCtrl.claimUnknownScan(barcode, docId);
         res.status(200).json({ _id: docId, ...productData, updated: true });
       } else {
         const ref = await db.collection('bottles').add(productData);
-        await demoCtrl.claimUnknownScan(barcode, ref.id);
+        if (req.device?.demo === true) await demoCtrl.claimUnknownScan(barcode, ref.id);
         res.status(201).json({ _id: ref.id, ...productData, created: true });
       }
     } catch (err) {

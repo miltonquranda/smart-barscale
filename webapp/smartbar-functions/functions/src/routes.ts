@@ -1,6 +1,4 @@
 import express from "express";
-import * as jwt from "jsonwebtoken";
-import { db } from './firebase';
 
 import CatCtrl from "./controllers/cat";
 import UserCtrl from "./controllers/user";
@@ -14,6 +12,16 @@ import StripeCtrl from "./controllers/stripe";
 import EmailCtrl from "./controllers/email";
 import DemoCtrl from "./controllers/demo";
 import PlatformCtrl from "./controllers/platform";
+import DashboardCtrl from "./controllers/dashboard";
+import ShiftCtrl from "./controllers/shift";
+
+import {
+  attachIdentity,
+  requireAuth,
+  requireUser,
+  requireRole,
+  requireBusinessMember,
+} from "./auth";
 
 export default function setRoutes(app) {
   const router = express.Router();
@@ -30,248 +38,148 @@ export default function setRoutes(app) {
   const emailCtrl = new EmailCtrl();
   const demoCtrl = new DemoCtrl();
   const platformCtrl = new PlatformCtrl();
+  const dashboardCtrl = new DashboardCtrl();
+  const shiftCtrl = new ShiftCtrl();
 
-  router.use((req, res, next) => {
-    // check header for the token
-    try {
-      if (!req.body.serialNumber && !req.headers.authorization && !req.body.token) {
-        // Allow requests without token (e.g. login/register) to proceed, 
-        // but if they need auth they will fail in controller or specific route guard.
-        // However, original code threw error if NO token found? 
-        // "Authorization Header not found"
-        // But wait, login route doesn't have token.
-        // The original code had:
-        // if (!req.body.serialNumber && !req.headers.authorization && !req.body.token) throw new Error(...)
-        // This seems to enforce token on ALL routes starting with /api?
-        // But login is /api/login.
-        // Maybe login sends a token? No, login returns a token.
-        // Maybe the original code was buggy or I misread it.
-        // Ah, the original code had a try/catch.
-        // If I look at original:
-        // if (!req.body.serialNumber && !req.headers.authorization && !req.body.token) throw new Error(...)
-        // This would block login if it doesn't send serialNumber or token.
-        // Login sends email/password.
-        // So this middleware seems to block login?
-        // Unless login is excluded?
-        // No, app.use('/api', router) applies to all.
-        // Maybe the user sends a dummy token or something?
-        // Or maybe I should just keep the logic as is but fix the DB part.
-        // Wait, if I throw, it goes to catch(e) -> next(e).
-        // Then error handler sends response.
-        // So login WOULD fail.
-        // Let's look at the original code again.
-        // It throws error, catches it, calls next(e).
-        // The error handler in app.ts sends status 500 or whatever.
-        // This seems wrong for a working app.
-        // Maybe `req.body.serialNumber` is present for device login?
-        // But for user login?
-        // I will replicate the logic but wrap the DB calls.
-        // If the original code was broken, I might fix it, but let's assume it worked somehow.
-        // Actually, if I throw, it goes to next(e).
-        // Maybe the routes are defined AFTER this middleware?
-        // Yes, `router.use` is at the top.
-        // So it applies to all.
+  // Resolve an identity from the token, if there is one. Never rejects; each
+  // route below states its own requirement.
+  router.use(attachIdentity);
 
-        // Let's just implement the DB part.
-      }
+  // ─── Public routes ─────────────────────────────────────────────────────
+  // Everything not listed here requires authentication.
+  router.route("/login").post(userCtrl.login);
+  router.route("/device/login").post(deviceCtrl.login);
+  router.route("/user/password-reset").post(userCtrl.passwordResetRequest);
+  router.route("/user/password-reset-verify").post(userCtrl.passwordResetVerify);
 
-      const token = (req.headers.authorization && (req.headers.authorization as string).split(" ")[1]) || req.body.token;
-      console.log('Auth Token:', token ? 'Found' : 'Missing');
+  // Everything below this line needs a valid user or device token.
+  router.use(requireAuth);
 
-      if (token) {
-        jwt.verify(token, process.env.SECRET_TOKEN as string, async function (err, payload) {
-          if (err) console.error('JWT Verify Error:', err);
-          if (payload) {
-            console.log('JWT Payload:', payload);
-            if (payload.user) {
-              try {
-                const doc = await db.collection('users').doc(payload.user._id).get();
-                if (doc.exists) {
-                  const user: any = { _id: doc.id, ...doc.data() };
-                  if (user.business && user.business.length > 0) {
-                    const businesses = [];
-                    for (const bizId of user.business) {
-                      const bDoc = await db.collection('businesses').doc(bizId).get();
-                      if (bDoc.exists) businesses.push({ _id: bDoc.id, ...bDoc.data() });
-                    }
-                    user.business = businesses;
-                  }
-                  req["user"] = user;
-                  next();
-                } else {
-                  next();
-                }
-              } catch (e) {
-                next(e);
-              }
-            } else if (payload.serialNumber) {
-              try {
-                const doc = await db.collection('devices').doc(payload.serialNumber._id).get();
-                if (doc.exists) {
-                  req["device"] = { _id: doc.id, ...doc.data() };
-                  next();
-                } else {
-                  next();
-                }
-              } catch (e) {
-                next(e);
-              }
-            } else {
-              next();
-            }
-          } else {
-            next();
-          }
-        });
-      } else {
-        next();
-      }
-    } catch (e) {
-      next(e);
-    }
-  });
-
-  const requireRole = (role) => {
-    return (req, res, next) => {
-      const platformAdmin = req.user && (req.user.role === 'admin' || req.user.role === 'platform_admin');
-      if (req.user && (req.user.role === role || (role === 'admin' && platformAdmin))) {
-        next();
-      } else {
-        res.sendStatus(403);
-      }
-    }
-  }
-
-  const canAccess = () => {
-    return (req, res, next) => {
-      const model = req.route.path.split('/')[1];
-      if (req.user && req.user.role === 'admin') return next();
-
-      if (model === 'business') {
-        const isbusinessUser = req.user && req.user.business && req.user.business.some(b => b._id === req.params.id);
-        if (isbusinessUser) {
-          next();
-        } else {
-          res.status(403).send('Not allowed to access this resource, does not belong to your business');
-        }
-      } else {
-        next();
-      }
-    }
-  }
-
-  // Cats
-  router.route("/cats").get(catCtrl.getAll);
-  router.route("/cats/count").get(catCtrl.count);
-  router.route("/cat").post(catCtrl.insert);
-  router.route("/cat/:id").get(catCtrl.get);
-  router.route("/cat/:id").put(catCtrl.update);
-  router.route("/cat/:id").delete(catCtrl.delete);
-
-  // Bottles
+  // ─── Catalog ───────────────────────────────────────────────────────────
+  // Reads are open to any authenticated caller (the mobile app and dashboard
+  // both need lookups); writes are restricted to staff roles.
   router.route("/bottles").get(bottleCtrl.getAll);
-  router.route("/bottles/:businessId").get(bottleCtrl.getAllInBusiness);
+  router.route("/bottles/page").get(bottleCtrl.getPage);
   router.route("/bottles/count").get(bottleCtrl.count);
-  router.route("/bottle").post(bottleCtrl.insert);
   router.route("/bottle/:id").get(bottleCtrl.get);
-  router.route("/bottle/:id").put(bottleCtrl.update);
-  router.route("/bottle/:id").delete(bottleCtrl.delete);
+  router.route("/bottles/:businessId").get(requireUser, bottleCtrl.getAllInBusiness);
+  router.route("/bottle").post(requireRole('business_admin', 'manager'), bottleCtrl.insert);
+  router.route("/bottle/:id").put(requireRole('business_admin', 'manager'), bottleCtrl.update);
+  router.route("/bottle/:id").delete(requireRole('admin'), bottleCtrl.delete);
 
-  // Product lookup (checks local DB, then Open Food Facts, then Gemini)
+  // Product lookup and upsert. The mobile app writes here after a scan, so a
+  // device token is sufficient — but it must be a token.
   router.route("/product/:barcode").get(bottleCtrl.getByBarcode);
   router.route("/product/:barcode").put(bottleCtrl.upsertByBarcode);
   router.route("/product/:barcode/image").post(bottleCtrl.uploadImage);
 
-  // Bottle Stats
-  router.route("/bottle-stats").get(bottleStatCtrl.getAllInBusiness);
-  router.route("/bottle-stats/count").get(bottleStatCtrl.count);
-  router.route("/bottle-stats").post(bottleStatCtrl.insert);
-  router.route("/bottle-stat/:id").get(bottleStatCtrl.get);
-  router.route("/bottle-stat/:id").put(bottleStatCtrl.update);
-  router.route("/bottle-stat/:id").delete(bottleStatCtrl.delete);
+  // ─── Cats (legacy sample resource) ─────────────────────────────────────
+  router.route("/cats").get(catCtrl.getAll);
+  router.route("/cats/count").get(catCtrl.count);
+  router.route("/cat").post(requireRole('admin'), catCtrl.insert);
+  router.route("/cat/:id").get(catCtrl.get);
+  router.route("/cat/:id").put(requireRole('admin'), catCtrl.update);
+  router.route("/cat/:id").delete(requireRole('admin'), catCtrl.delete);
 
-  // Businesses
-  router.route("/businesses").get(businessCtrl.getAll);
-  router.route("/businesses/count").get(businessCtrl.count);
-  router.route("/business").post(businessCtrl.insert);
-  router.route("/business/:id").get(canAccess(), businessCtrl.get);
-  router.route("/business/:id/users").get(canAccess(), businessCtrl.getUsers);
-  router.route("/business/:id/devices").get(canAccess(), businessCtrl.getDevices);
-  router.route("/business/:id").put(businessCtrl.update);
+  // ─── Bottle stats ──────────────────────────────────────────────────────
+  // POST is the device scan endpoint; the rest are dashboard reads.
+  router.route("/bottle-stats").post(bottleStatCtrl.insert);
+  router.route("/bottle-stats").get(requireUser, bottleStatCtrl.getAllInBusiness);
+  router.route("/bottle-stats/count").get(requireUser, bottleStatCtrl.count);
+  router.route("/bottle-stat/:id").get(requireUser, bottleStatCtrl.get);
+  router.route("/bottle-stat/:id").put(requireRole('business_admin', 'manager'), bottleStatCtrl.update);
+  router.route("/bottle-stat/:id").delete(requireRole('business_admin', 'manager'), bottleStatCtrl.delete);
+
+  // ─── Businesses ────────────────────────────────────────────────────────
+  router.route("/businesses").get(requireRole('admin'), businessCtrl.getAll);
+  router.route("/businesses/count").get(requireRole('admin'), businessCtrl.count);
+  router.route("/business").post(requireRole('admin'), businessCtrl.insert);
+  router.route("/business/:id").get(requireBusinessMember, businessCtrl.get);
+  router.route("/business/:id/users").get(requireBusinessMember, businessCtrl.getUsers);
+  router.route("/business/:id/devices").get(requireBusinessMember, businessCtrl.getDevices);
+  router.route("/business/:id").put(requireBusinessMember, businessCtrl.update);
   router.route("/business/:id").delete(requireRole('admin'), businessCtrl.delete);
 
-  // Users
-  router.route("/login").post(userCtrl.login);
+  // ─── Users ─────────────────────────────────────────────────────────────
   router.route("/users").get(requireRole('admin'), userCtrl.getAllWith(['business']));
-  router.route("/users/count").get(userCtrl.count);
-  router.route("/user").post(userCtrl.insert);
-  router.route("/user/:id").get(userCtrl.get);
-  router.route("/user/:id").put(userCtrl.update);
+  router.route("/users/count").get(requireRole('admin'), userCtrl.count);
+  router.route("/user").post(requireRole('admin'), userCtrl.insert);
+  router.route("/user/:id").get(requireUser, userCtrl.get);
+  router.route("/user/:id").put(requireUser, userCtrl.update);
   router.route("/user/:id").delete(requireRole('admin'), userCtrl.delete);
-  router.route("/user/password-reset").post(userCtrl.passwordResetRequest);
-  router.route("/user/password-reset-verify").post(userCtrl.passwordResetVerify);
 
-  // Devices
-  router.route("/device/login").post(deviceCtrl.login);
-  router.route("/device/serial/:serialNumber").get(deviceCtrl.getBySerial);
-  router.route("/device/serial/:serialNumber/assign").post(deviceCtrl.assignBusiness);
+  // ─── Devices ───────────────────────────────────────────────────────────
   router.route("/devices").get(requireRole('admin'), deviceCtrl.getAllWith(['business']));
-  router.route("/devices/count").get(deviceCtrl.count);
-  router.route("/device").post(deviceCtrl.insert);
-  router.route("/device/:id").get(deviceCtrl.get);
-  router.route("/device/:id").put(deviceCtrl.update);
-  router.route("/device/:id").delete(deviceCtrl.delete);
+  router.route("/devices/count").get(requireRole('admin'), deviceCtrl.count);
+  router.route("/device").post(requireRole('admin'), deviceCtrl.insert);
+  router.route("/device/serial/:serialNumber").get(deviceCtrl.getBySerial);
+  router.route("/device/serial/:serialNumber/assign").post(requireUser, deviceCtrl.assignBusiness);
+  router.route("/device/:id").get(requireUser, deviceCtrl.get);
+  router.route("/device/:id").put(requireRole('business_admin', 'manager'), deviceCtrl.update);
+  router.route("/device/:id").delete(requireRole('admin'), deviceCtrl.delete);
 
-  // Categories (hierarchical, max 5 levels)
+  // ─── Categories ────────────────────────────────────────────────────────
   router.route("/categories").get(categoryCtrl.getAll);
   router.route("/categories/tree").get(categoryCtrl.getTree);
   router.route("/category").post(categoryCtrl.insert);
-  router.route("/category/:id").put(categoryCtrl.update);
-  router.route("/category/:id").delete(categoryCtrl.delete);
+  router.route("/category/:id").put(requireRole('business_admin', 'manager'), categoryCtrl.update);
+  router.route("/category/:id").delete(requireRole('admin'), categoryCtrl.delete);
 
-  // Inventory Sessions (optional named tracking periods)
-  router.route("/inventory/sessions").get(inventoryCtrl.getSessions);
-  router.route("/inventory/session").post(inventoryCtrl.startSession);
-  router.route("/inventory/session/:id").get(inventoryCtrl.getSession);
-  router.route("/inventory/session/:id").put(inventoryCtrl.updateSession);
-  router.route("/inventory/session/:id").delete(inventoryCtrl.deleteSession);
+  // ─── Inventory sessions ────────────────────────────────────────────────
+  router.route("/inventory/sessions").get(requireUser, inventoryCtrl.getSessions);
+  router.route("/inventory/session").post(requireUser, inventoryCtrl.startSession);
+  router.route("/inventory/session/:id").get(requireUser, inventoryCtrl.getSession);
+  router.route("/inventory/session/:id").put(requireUser, inventoryCtrl.updateSession);
+  router.route("/inventory/session/:id").delete(requireUser, inventoryCtrl.deleteSession);
 
-  // Inventory Readings (continuous data stream)
-  router.route("/inventory/readings").get(inventoryCtrl.getReadings);
+  // ─── Inventory readings ────────────────────────────────────────────────
+  router.route("/inventory/readings").get(requireUser, inventoryCtrl.getReadings);
   router.route("/inventory/reading").post(inventoryCtrl.addReadingAPI);
-  router.route("/inventory/reading/:id").delete(inventoryCtrl.deleteReading);
+  router.route("/inventory/reading/:id").delete(requireUser, inventoryCtrl.deleteReading);
 
-  // Inventory Events (deliveries, breakage, comps)
-  router.route("/inventory/events").get(inventoryCtrl.getEvents);
-  router.route("/inventory/event").post(inventoryCtrl.addEvent);
-  router.route("/inventory/event/:id").delete(inventoryCtrl.deleteEvent);
+  // ─── Inventory events ──────────────────────────────────────────────────
+  router.route("/inventory/events").get(requireUser, inventoryCtrl.getEvents);
+  router.route("/inventory/event").post(requireUser, inventoryCtrl.addEvent);
+  router.route("/inventory/event/:id").delete(requireUser, inventoryCtrl.deleteEvent);
 
-  // Consumption Reports (time-range based)
-  router.route("/inventory/reports").get(inventoryCtrl.getReports);
-  router.route("/inventory/report").post(inventoryCtrl.generateReport);
-  router.route("/inventory/report/:id").get(inventoryCtrl.getReport);
+  // ─── Consumption reports ───────────────────────────────────────────────
+  router.route("/inventory/reports").get(requireUser, inventoryCtrl.getReports);
+  router.route("/inventory/report").post(requireUser, inventoryCtrl.generateReport);
+  router.route("/inventory/report/:id").get(requireUser, inventoryCtrl.getReport);
 
-  // Product inventory config (bottle specs)
-  router.route("/inventory/product/:barcode/config").put(inventoryCtrl.updateProductConfig);
+  // ─── Product inventory config and stock entry ──────────────────────────
+  router.route("/inventory/product/:barcode/config").put(requireUser, inventoryCtrl.updateProductConfig);
+  router.route("/inventory/opening-count").post(requireUser, inventoryCtrl.recordOpeningCount);
+  router.route("/inventory/add-stock").post(requireUser, inventoryCtrl.addStock);
+  router.route("/inventory/seed-sample").post(requireUser, inventoryCtrl.seedSampleInventory);
 
-  // Demo environment: deterministic seed, reset, simulation, and dashboard data.
+  // ─── Dashboard ─────────────────────────────────────────────────────────
+  router.route("/dashboard").get(requireUser, dashboardCtrl.get);
+
+  // ─── Shifts ────────────────────────────────────────────────────────────
+  router.route("/shifts").get(requireUser, shiftCtrl.getAll);
+  router.route("/shifts/defaults").post(requireUser, shiftCtrl.seedDefaults);
+  router.route("/shift").post(requireUser, shiftCtrl.insert);
+  router.route("/shift/:id").put(requireUser, shiftCtrl.update);
+  router.route("/shift/:id").delete(requireUser, shiftCtrl.delete);
+
+  // ─── Demo environment (platform admins only) ───────────────────────────
   router.route("/demo/seed").post(requireRole('admin'), demoCtrl.seed);
   router.route("/demo/reset").post(requireRole('admin'), demoCtrl.reset);
   router.route("/demo/simulate").post(requireRole('admin'), demoCtrl.simulate);
   router.route("/demo/dashboard").get(requireRole('admin'), demoCtrl.dashboard);
 
-  // Platform administration: provisioning and lifecycle management.
+  // ─── Platform administration ───────────────────────────────────────────
   router.route("/platform/businesses").get(requireRole('admin'), platformCtrl.listBusinesses);
   router.route("/platform/businesses").post(requireRole('admin'), platformCtrl.onboardBusiness);
   router.route("/platform/businesses/:id/status").patch(requireRole('admin'), platformCtrl.updateBusinessStatus);
   router.route("/platform/devices/:id/assign").patch(requireRole('admin'), platformCtrl.assignDevice);
+  router.route("/platform/devices/:id/demo").patch(requireRole('admin'), platformCtrl.setDeviceDemo);
 
-  // Stripe
-  router.route("/stripe/test").post(stripeCtrl.test);
-  router.route("/stripe/customer/:customerId").get(stripeCtrl.retrieveCustomer);
+  // ─── Stripe / email ────────────────────────────────────────────────────
+  router.route("/stripe/test").post(requireRole('admin'), stripeCtrl.test);
+  router.route("/stripe/customer/:customerId").get(requireRole('admin'), stripeCtrl.retrieveCustomer);
+  router.route("/messages/test").get(requireRole('admin'), emailCtrl.sendMessage);
 
-  router.route("/messages/test").get(emailCtrl.sendMessage);
-
-  // Apply the routes to our application with the prefix /api
   app.use("/api", router);
 }

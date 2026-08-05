@@ -11,17 +11,36 @@ interface ProductForm {
     weight: string;
     country_of_origin: string;
     ingredients: string;
+    // Inventory specs. The scale reports grams; these are what turn grams into
+    // millilitres and dollars. Without all three of full weight, empty weight
+    // and volume, every derived figure on the dashboard is zero.
+    bottle_full_weight_g: string;
+    bottle_empty_weight_g: string;
+    bottle_volume_ml: string;
+    cost_per_bottle: string;
+    par_level: string;
+    pour_price: string;
+    pour_volume_ml: string;
 }
 
 const emptyForm: ProductForm = {
     name: '', brand: '', description: '', category: '',
     image_url: '', quantity: '', weight: '',
     country_of_origin: '', ingredients: '',
+    bottle_full_weight_g: '', bottle_empty_weight_g: '', bottle_volume_ml: '',
+    cost_per_bottle: '', par_level: '', pour_price: '', pour_volume_ml: '',
 };
 
+const numOrEmpty = (v: any) => (v === null || v === undefined || v === '' ? '' : String(v));
+
 const Products = () => {
+    const PAGE_SIZE = 25;
     const [products, setProducts] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [page, setPage] = useState(0);
+    const [pageCursors, setPageCursors] = useState<(string | null)[]>([null]);
+    const [hasNextPage, setHasNextPage] = useState(false);
+    const [totalProducts, setTotalProducts] = useState<number | null>(null);
     const [barcodeLookup, setBarcodeLookup] = useState('');
     const [lookupLoading, setLookupLoading] = useState(false);
     const [lookupResult, setLookupResult] = useState<any>(null);
@@ -38,7 +57,8 @@ const Products = () => {
     const [newCatParent, setNewCatParent] = useState('');
     const [addingCat, setAddingCat] = useState(false);
 
-    useEffect(() => { fetchProducts(); fetchCategories(); }, []);
+    useEffect(() => { fetchCategories(); fetchProductCount(); }, []);
+    useEffect(() => { fetchProducts(); }, [page]);
 
     const fetchCategories = async () => {
         try {
@@ -83,14 +103,40 @@ const Products = () => {
     };
 
     const fetchProducts = async () => {
+        setLoading(true);
         try {
-            const resp = await api.get('/bottles');
-            setProducts(resp.data);
+            const cursor = pageCursors[page];
+            const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
+            if (cursor) query.set('cursor', cursor);
+            const resp = await api.get(`/bottles/page?${query.toString()}`);
+            setProducts(resp.data.products || []);
+            setHasNextPage(Boolean(resp.data.hasMore));
         } catch (err) {
             console.error('Failed to fetch products', err);
         } finally {
             setLoading(false);
         }
+    };
+
+    const fetchProductCount = async () => {
+        try {
+            const resp = await api.get('/bottles/count');
+            const count = typeof resp.data === 'number' ? resp.data : resp.data.count;
+            if (Number.isFinite(Number(count))) setTotalProducts(Number(count));
+        } catch (err) {
+            console.error('Failed to fetch product count', err);
+        }
+    };
+
+    const goToNextPage = () => {
+        if (!hasNextPage) return;
+        setPageCursors(prev => [...prev, null]);
+        setPage(page + 1);
+    };
+
+    const goToPreviousPage = () => {
+        if (page === 0) return;
+        setPage(page - 1);
     };
 
     const handleLookup = async (e: React.FormEvent) => {
@@ -129,6 +175,13 @@ const Products = () => {
             weight: data.weight || '',
             country_of_origin: data.country_of_origin || '',
             ingredients: data.ingredients || '',
+            bottle_full_weight_g: numOrEmpty(data.bottle_full_weight_g),
+            bottle_empty_weight_g: numOrEmpty(data.bottle_empty_weight_g),
+            bottle_volume_ml: numOrEmpty(data.bottle_volume_ml),
+            cost_per_bottle: numOrEmpty(data.cost_per_bottle),
+            par_level: numOrEmpty(data.par_level),
+            pour_price: numOrEmpty(data.pour_price),
+            pour_volume_ml: numOrEmpty(data.pour_volume_ml),
         });
     };
 
@@ -147,7 +200,27 @@ const Products = () => {
         setSaving(true);
         setSaveMsg('');
         try {
-            const resp = await api.put(`/product/${editBarcode.trim()}`, form);
+            // Numeric specs go over the wire as numbers, not strings. An empty
+            // field means "not set" and is sent as null so the API can tell it
+            // apart from a deliberate zero.
+            const numericFields = [
+                'bottle_full_weight_g', 'bottle_empty_weight_g', 'bottle_volume_ml',
+                'cost_per_bottle', 'par_level', 'pour_price', 'pour_volume_ml',
+            ] as const;
+            const payload: any = { ...form };
+            numericFields.forEach(key => {
+                payload[key] = form[key] === '' ? null : Number(form[key]);
+            });
+
+            const full = payload.bottle_full_weight_g;
+            const empty = payload.bottle_empty_weight_g;
+            if (full !== null && empty !== null && full <= empty) {
+                setSaveMsg('Full bottle weight must be greater than empty bottle weight.');
+                setSaving(false);
+                return;
+            }
+
+            const resp = await api.put(`/product/${editBarcode.trim()}`, payload);
             setSaveMsg(resp.data.created ? 'Product created!' : 'Product updated!');
             setLookupResult(resp.data);
             fetchProducts();
@@ -304,6 +377,74 @@ const Products = () => {
                                 <label style={labelStyle}>Country of Origin</label>
                                 <input value={form.country_of_origin} onChange={e => setForm({ ...form, country_of_origin: e.target.value })} style={inputStyle} />
                             </div>
+
+                            {/* ── Inventory specs ─────────────────────────────
+                                These drive every number on the dashboard. The
+                                scale reports grams; without full weight, empty
+                                weight and volume there is no way to convert a
+                                reading into millilitres, so on-hand value,
+                                consumption and pour cost all come out zero. */}
+                            <div style={{ gridColumn: '1 / -1', marginTop: 8, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
+                                <h3 style={{ margin: '0 0 4px', fontSize: 15, color: 'var(--color-text)' }}>Inventory & pricing specs</h3>
+                                <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                                    Required for inventory tracking. Weigh one full bottle and one empty bottle of this product
+                                    on the scale to get accurate figures — printed volumes alone aren't enough.
+                                </p>
+                                <SpecCompleteness form={form} />
+                            </div>
+
+                            <div>
+                                <label style={labelStyle}>Full bottle weight (g) *</label>
+                                <input type="number" min="0" step="1" value={form.bottle_full_weight_g}
+                                    onChange={e => setForm({ ...form, bottle_full_weight_g: e.target.value })}
+                                    placeholder="e.g. 1250" style={inputStyle} />
+                                <FieldHint text="Unopened bottle on the scale, including glass." />
+                            </div>
+                            <div>
+                                <label style={labelStyle}>Empty bottle weight (g) *</label>
+                                <input type="number" min="0" step="1" value={form.bottle_empty_weight_g}
+                                    onChange={e => setForm({ ...form, bottle_empty_weight_g: e.target.value })}
+                                    placeholder="e.g. 500" style={inputStyle} />
+                                <FieldHint text="Same bottle, fully drained. Varies a lot by bottle shape." />
+                            </div>
+                            <div>
+                                <label style={labelStyle}>Bottle volume (ml) *</label>
+                                <input type="number" min="0" step="1" value={form.bottle_volume_ml}
+                                    onChange={e => setForm({ ...form, bottle_volume_ml: e.target.value })}
+                                    placeholder="e.g. 750" style={inputStyle} />
+                                <FieldHint text="Liquid capacity, not the bottle's total size." />
+                            </div>
+                            <div>
+                                <label style={labelStyle}>Cost per bottle ($)</label>
+                                <input type="number" min="0" step="0.01" value={form.cost_per_bottle}
+                                    onChange={e => setForm({ ...form, cost_per_bottle: e.target.value })}
+                                    placeholder="e.g. 24.50" style={inputStyle} />
+                                <FieldHint text="What you pay your supplier. Drives inventory value and pour cost." />
+                            </div>
+                            <div>
+                                <label style={labelStyle}>Pour price ($)</label>
+                                <input type="number" min="0" step="0.01" value={form.pour_price}
+                                    onChange={e => setForm({ ...form, pour_price: e.target.value })}
+                                    placeholder="e.g. 12.00" style={inputStyle} />
+                                <FieldHint text="Menu price for one pour. Without it, revenue and pour cost are excluded." />
+                            </div>
+                            <div>
+                                <label style={labelStyle}>Pour size (ml)</label>
+                                <input type="number" min="0" step="1" value={form.pour_volume_ml}
+                                    onChange={e => setForm({ ...form, pour_volume_ml: e.target.value })}
+                                    placeholder="e.g. 45" style={inputStyle} />
+                                <FieldHint text="Standard measure. A US 1.5oz shot is about 44ml." />
+                            </div>
+                            <div>
+                                <label style={labelStyle}>Par level (bottles)</label>
+                                <input type="number" min="0" step="1" value={form.par_level}
+                                    onChange={e => setForm({ ...form, par_level: e.target.value })}
+                                    placeholder="e.g. 6" style={inputStyle} />
+                                <FieldHint text="Target stock level, used for reorder prompts." />
+                            </div>
+                            <div style={{ gridColumn: '1 / -1' }}>
+                                <SpecPreview form={form} />
+                            </div>
                             <div style={{ gridColumn: '1 / -1' }}>
                                 <label style={labelStyle}>Product Image</label>
                                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: 8 }}>
@@ -347,7 +488,9 @@ const Products = () => {
 
             {/* Product list */}
             <div style={{ padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 8, backgroundColor: 'var(--color-surface)' }}>
-                <h3 style={{ color: 'var(--color-text)', marginTop: 0 }}>All Products ({products.length})</h3>
+                <h3 style={{ color: 'var(--color-text)', marginTop: 0 }}>
+                    All Products ({totalProducts === null ? products.length : totalProducts})
+                </h3>
                 {loading ? <p>Loading...</p> : (
                     <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -392,9 +535,119 @@ const Products = () => {
                         </table>
                     </div>
                 )}
+                {!loading && (page > 0 || hasNextPage) && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem' }}>
+                        <button onClick={goToPreviousPage} disabled={page === 0}
+                            style={{ ...btnStyle('#6c757d'), opacity: page === 0 ? 0.5 : 1 }}>
+                            Previous
+                        </button>
+                        <span style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>
+                            Page {page + 1} · Showing {products.length} products
+                        </span>
+                        <button onClick={goToNextPage} disabled={!hasNextPage}
+                            style={{ ...btnStyle('#007bff'), opacity: hasNextPage ? 1 : 0.5 }}>
+                            Next
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );
+};
+
+// ─── Spec helpers ────────────────────────────────────────────────────────────
+
+const FieldHint = ({ text }: { text: string }) => (
+    <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 3, lineHeight: 1.4 }}>{text}</div>
+);
+
+/** Traffic-light summary of which capabilities the entered specs unlock. */
+const SpecCompleteness = ({ form }: { form: any }) => {
+    const num = (v: string) => (v === '' ? null : Number(v));
+    const hasTracking = !!(num(form.bottle_full_weight_g) && num(form.bottle_empty_weight_g) && num(form.bottle_volume_ml));
+    const hasValue = hasTracking && !!num(form.cost_per_bottle);
+    const hasRevenue = hasValue && !!num(form.pour_price) && !!num(form.pour_volume_ml);
+
+    const items = [
+        { ok: hasTracking, label: 'Volume tracking', need: 'needs full + empty weight and volume' },
+        { ok: hasValue, label: 'Inventory value', need: 'also needs cost per bottle' },
+        { ok: hasRevenue, label: 'Revenue & pour cost', need: 'also needs pour price and size' },
+    ];
+
+    return (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            {items.map(item => (
+                <span key={item.label} title={item.ok ? 'Enabled' : item.need} style={{
+                    fontSize: 11, padding: '4px 10px', borderRadius: 12,
+                    backgroundColor: item.ok ? '#28a74518' : '#6c757d18',
+                    color: item.ok ? '#28a745' : 'var(--color-text-muted)',
+                    border: `1px solid ${item.ok ? '#28a74540' : 'var(--color-border)'}`,
+                }}>
+                    {item.ok ? '✓' : '○'} {item.label}
+                </span>
+            ))}
+        </div>
+    );
+};
+
+/**
+ * Shows what the entered specs imply, so a typo is obvious before saving.
+ * A transposed empty weight or a volume in the wrong unit produces a pour cost
+ * that is visibly absurd here, rather than quietly wrong on the dashboard.
+ */
+const SpecPreview = ({ form }: { form: any }) => {
+    const num = (v: string) => (v === '' ? NaN : Number(v));
+    const full = num(form.bottle_full_weight_g);
+    const empty = num(form.bottle_empty_weight_g);
+    const volume = num(form.bottle_volume_ml);
+    const cost = num(form.cost_per_bottle);
+    const pourPrice = num(form.pour_price);
+    const pourVol = num(form.pour_volume_ml);
+
+    if (!Number.isFinite(full) || !Number.isFinite(empty) || !Number.isFinite(volume) || volume <= 0) return null;
+    if (full <= empty) {
+        return (
+            <div style={{ ...previewBox, borderColor: '#dc354540', backgroundColor: '#dc354510', color: '#dc3545' }}>
+                Full bottle weight must be greater than empty bottle weight — check those two figures.
+            </div>
+        );
+    }
+
+    const liquidWeight = full - empty;
+    const density = liquidWeight / volume;
+    const rows: string[] = [
+        `Liquid weighs ${liquidWeight}g at ${volume}ml → ${density.toFixed(2)} g/ml`,
+    ];
+    if (Number.isFinite(cost) && cost > 0) {
+        rows.push(`Cost per ml: $${(cost / volume).toFixed(4)}`);
+        if (Number.isFinite(pourPrice) && Number.isFinite(pourVol) && pourVol > 0 && pourPrice > 0) {
+            const pourCost = ((cost / volume) * pourVol / pourPrice) * 100;
+            rows.push(`One ${pourVol}ml pour costs $${((cost / volume) * pourVol).toFixed(2)} and sells for $${pourPrice.toFixed(2)} → ${pourCost.toFixed(1)}% pour cost`);
+            rows.push(`${Math.floor(volume / pourVol)} pours per bottle`);
+        }
+    }
+
+    // Spirits sit near 0.94 g/ml, water at 1.0. Well outside that range almost
+    // always means a unit mix-up rather than an unusual product.
+    const suspect = density < 0.6 || density > 1.5;
+
+    return (
+        <div style={{ ...previewBox, ...(suspect ? { borderColor: '#f0ad4e40', backgroundColor: '#f0ad4e10' } : {}) }}>
+            <strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Check these figures look right</strong>
+            {rows.map(r => <div key={r} style={{ fontSize: 12, lineHeight: 1.7 }}>{r}</div>)}
+            {suspect && (
+                <div style={{ fontSize: 12, color: '#f0ad4e', marginTop: 6 }}>
+                    That density is unusual — most spirits are around 0.94 g/ml. Check the weights are in grams and the volume in millilitres.
+                </div>
+            )}
+        </div>
+    );
+};
+
+const previewBox: React.CSSProperties = {
+    marginTop: 12, padding: '10px 14px', borderRadius: 6,
+    border: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg)',
+    color: 'var(--color-text-muted)',
 };
 
 const btnStyle = (bg: string): React.CSSProperties => ({
