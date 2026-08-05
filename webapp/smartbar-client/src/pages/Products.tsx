@@ -82,6 +82,15 @@ const Products = () => {
         return opts;
     };
 
+    // Products persist the category document ID. Resolve it for display while
+    // also accepting older records that stored a path or name directly.
+    const categoryLabel = (value: any): string => {
+        if (!value) return '—';
+        if (typeof value === 'object') return value.path || value.name || value._id || '—';
+        const category = categories.find(c => c._id === value || c.path === value || c.name === value);
+        return category?.path || category?.name || String(value);
+    };
+
     const handleAddCategory = async () => {
         if (!newCatName.trim()) return;
         setAddingCat(true);
@@ -513,7 +522,7 @@ const Products = () => {
                                             <td style={tdStyle}><code>{p.barcode}</code></td>
                                             <td style={tdStyle}>{p.name || '—'}</td>
                                             <td style={tdStyle}>{p.brand || '—'}</td>
-                                            <td style={tdStyle}>{p.category || '—'}</td>
+                                            <td style={tdStyle}>{categoryLabel(p.category_name || p.category)}</td>
                                             <td style={tdStyle}>
                                                 <span style={{
                                                     fontSize: 11, padding: '2px 8px', borderRadius: 10,
