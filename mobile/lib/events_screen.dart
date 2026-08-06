@@ -54,7 +54,7 @@ class _EventsScreenState extends State<EventsScreen> {
     if (base == null) {
       setState(() {
         _loading = false;
-        _error = 'Set the server URL on the Account tab to connect.';
+        _error = 'The app service is temporarily unavailable.';
       });
       return;
     }
@@ -112,87 +112,94 @@ class _EventsScreenState extends State<EventsScreen> {
           IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
         ],
       ),
-      body: _needsSignIn
-          ? const _SignInRequired()
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  const Text(
-                    'What happened?',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Logging these as they happen is what separates a real loss from '
-                    'an unexplained one.',
-                    style: TextStyle(fontSize: 12.5, color: Colors.black54),
-                  ),
-                  const SizedBox(height: 14),
-                  GridView.count(
-                    crossAxisCount: 2,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 2.1,
-                    children: [
-                      _EventButton(
-                        icon: Icons.broken_image_outlined,
-                        label: 'Breakage',
-                        color: Colors.red,
-                        onTap: () => _openLogSheet('breakage'),
+      body:
+          _needsSignIn
+              ? const _SignInRequired()
+              : RefreshIndicator(
+                onRefresh: _load,
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    const Text(
+                      'What happened?',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
                       ),
-                      _EventButton(
-                        icon: Icons.card_giftcard,
-                        label: 'Comp',
-                        color: Colors.orange,
-                        onTap: () => _openLogSheet('comp'),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Logging these as they happen is what separates a real loss from '
+                      'an unexplained one.',
+                      style: TextStyle(fontSize: 12.5, color: Colors.black54),
+                    ),
+                    const SizedBox(height: 14),
+                    GridView.count(
+                      crossAxisCount: 2,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 10,
+                      childAspectRatio: 2.1,
+                      children: [
+                        _EventButton(
+                          icon: Icons.broken_image_outlined,
+                          label: 'Breakage',
+                          color: Colors.red,
+                          onTap: () => _openLogSheet('breakage'),
+                        ),
+                        _EventButton(
+                          icon: Icons.card_giftcard,
+                          label: 'Comp',
+                          color: Colors.orange,
+                          onTap: () => _openLogSheet('comp'),
+                        ),
+                        _EventButton(
+                          icon: Icons.local_shipping_outlined,
+                          label: 'Delivery',
+                          color: Colors.green,
+                          onTap: () => _openLogSheet('delivery'),
+                        ),
+                        _EventButton(
+                          icon: Icons.delete_outline,
+                          label: 'Spoilage',
+                          color: Colors.brown,
+                          onTap: () => _openLogSheet('spoilage'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Recent',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
                       ),
-                      _EventButton(
-                        icon: Icons.local_shipping_outlined,
-                        label: 'Delivery',
-                        color: Colors.green,
-                        onTap: () => _openLogSheet('delivery'),
-                      ),
-                      _EventButton(
-                        icon: Icons.delete_outline,
-                        label: 'Spoilage',
-                        color: Colors.brown,
-                        onTap: () => _openLogSheet('spoilage'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Recent',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  if (_loading)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  else if (_error != null)
-                    Text(
-                      _error!,
-                      style: const TextStyle(color: Colors.red, fontSize: 13),
-                    )
-                  else if (_recent.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Text(
-                        'Nothing logged yet.',
-                        style: TextStyle(color: Colors.black54, fontSize: 13),
-                      ),
-                    )
-                  else
-                    ..._recent.map(_eventTile),
-                ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (_loading)
+                      const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (_error != null)
+                      Text(
+                        _error!,
+                        style: const TextStyle(color: Colors.red, fontSize: 13),
+                      )
+                    else if (_recent.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Text(
+                          'Nothing logged yet.',
+                          style: TextStyle(color: Colors.black54, fontSize: 13),
+                        ),
+                      )
+                    else
+                      ..._recent.map(_eventTile),
+                  ],
+                ),
               ),
-            ),
     );
   }
 
@@ -321,7 +328,8 @@ class _LogEventSheetState extends State<_LogEventSheet> {
       );
       if (!mounted) return;
       setState(() {
-        _results = ((data as Map)['results'] as List).cast<Map<String, dynamic>>();
+        _results =
+            ((data as Map)['results'] as List).cast<Map<String, dynamic>>();
         _searching = false;
       });
     } catch (_) {
@@ -340,17 +348,14 @@ class _LogEventSheetState extends State<_LogEventSheet> {
       _error = null;
     });
     try {
-      final resp = await SmartBarApi.post(
-        widget.baseUrl,
-        '/api/inventory/event',
-        {
-          'barcode': _product!['barcode'],
-          'product_id': _product!['_id'],
-          'event_type': _type,
-          'quantity': int.tryParse(_qtyCtrl.text.trim()) ?? 1,
-          'notes': _notesCtrl.text.trim(),
-        },
-      );
+      final resp =
+          await SmartBarApi.post(widget.baseUrl, '/api/inventory/event', {
+            'barcode': _product!['barcode'],
+            'product_id': _product!['_id'],
+            'event_type': _type,
+            'quantity': int.tryParse(_qtyCtrl.text.trim()) ?? 1,
+            'notes': _notesCtrl.text.trim(),
+          });
       if (!mounted) return;
       if (resp.statusCode == 201) {
         Navigator.pop(context, true);
@@ -414,11 +419,15 @@ class _LogEventSheetState extends State<_LogEventSheet> {
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
-              items: _types.entries
-                  .map(
-                    (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
-                  )
-                  .toList(),
+              items:
+                  _types.entries
+                      .map(
+                        (e) => DropdownMenuItem(
+                          value: e.key,
+                          child: Text(e.value),
+                        ),
+                      )
+                      .toList(),
               onChanged: (v) => setState(() => _type = v ?? _type),
             ),
             const SizedBox(height: 12),
@@ -445,16 +454,17 @@ class _LogEventSheetState extends State<_LogEventSheet> {
                   helperText: 'Or scan the bottle on the scale',
                   border: const OutlineInputBorder(),
                   isDense: true,
-                  suffixIcon: _searching
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        )
-                      : const Icon(Icons.search),
+                  suffixIcon:
+                      _searching
+                          ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                          : const Icon(Icons.search),
                 ),
               ),
               if (_results.isNotEmpty)
@@ -472,11 +482,12 @@ class _LogEventSheetState extends State<_LogEventSheet> {
                           r['brand']?.toString() ?? '',
                           style: const TextStyle(fontSize: 11.5),
                         ),
-                        onTap: () => setState(() {
-                          _product = r;
-                          _results = [];
-                          _searchCtrl.clear();
-                        }),
+                        onTap:
+                            () => setState(() {
+                              _product = r;
+                              _results = [];
+                              _searchCtrl.clear();
+                            }),
                       );
                     },
                   ),
@@ -489,9 +500,10 @@ class _LogEventSheetState extends State<_LogEventSheet> {
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
                 labelText: 'Bottles',
-                helperText: _type == 'delivery' || _type == 'transfer_in'
-                    ? 'How many arrived'
-                    : 'How many were lost',
+                helperText:
+                    _type == 'delivery' || _type == 'transfer_in'
+                        ? 'How many arrived'
+                        : 'How many were lost',
                 border: const OutlineInputBorder(),
                 isDense: true,
               ),

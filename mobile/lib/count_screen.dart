@@ -76,14 +76,16 @@ class _CountScreenState extends State<CountScreen> {
 
     final weight = _scale.weightGrams;
     if (weight == null) {
-      setState(() => _message = 'Scanned $barcode but the scale had no reading.');
+      setState(
+        () => _message = 'Scanned $barcode but the scale had no reading.',
+      );
       return;
     }
 
     _pendingBarcode = barcode;
     final base = widget.getServerBaseUrl();
     if (base == null) {
-      setState(() => _message = 'Set the server URL on the Account tab to connect.');
+      setState(() => _message = 'The app service is temporarily unavailable.');
       _pendingBarcode = null;
       return;
     }
@@ -101,15 +103,17 @@ class _CountScreenState extends State<CountScreen> {
 
     if (product == null) {
       setState(() {
-        _message = 'Barcode $barcode is not in the catalog. Add it from the Scale tab first.';
+        _message =
+            'Barcode $barcode is not in the catalog. Add it from the Scale tab first.';
       });
       _pendingBarcode = null;
       return;
     }
 
-    final needsSpecs = !(_num(product['bottle_full_weight_g']) > 0
-        && _num(product['bottle_empty_weight_g']) > 0
-        && _num(product['bottle_volume_ml']) > 0);
+    final needsSpecs =
+        !(_num(product['bottle_full_weight_g']) > 0 &&
+            _num(product['bottle_empty_weight_g']) > 0 &&
+            _num(product['bottle_volume_ml']) > 0);
 
     final existingIndex = _entries.indexWhere((e) => e.barcode == barcode);
     final sealed = await _askSealedCount(
@@ -151,41 +155,43 @@ class _CountScreenState extends State<CountScreen> {
     return showDialog<int>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: Text(name, style: const TextStyle(fontSize: 16)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Open bottle weighed at ${_scale.weightGrams?.toStringAsFixed(1) ?? '--'} g.',
-              style: const TextStyle(fontSize: 13, color: Colors.black54),
+      builder:
+          (ctx) => AlertDialog(
+            title: Text(name, style: const TextStyle(fontSize: 16)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Open bottle weighed at ${_scale.weightGrams?.toStringAsFixed(1) ?? '--'} g.',
+                  style: const TextStyle(fontSize: 13, color: Colors.black54),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: ctrl,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Unopened bottles behind the bar',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Unopened bottles behind the bar',
-                border: OutlineInputBorder(),
-                isDense: true,
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('Skip'),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, null),
-            child: const Text('Skip'),
+              FilledButton(
+                onPressed:
+                    () =>
+                        Navigator.pop(ctx, int.tryParse(ctrl.text.trim()) ?? 0),
+                child: const Text('Add to count'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(ctx, int.tryParse(ctrl.text.trim()) ?? 0),
-            child: const Text('Add to count'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -199,11 +205,12 @@ class _CountScreenState extends State<CountScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => SpecCaptureSheet(
-        barcode: entry.barcode,
-        productName: entry.name,
-        baseUrl: base,
-      ),
+      builder:
+          (_) => SpecCaptureSheet(
+            barcode: entry.barcode,
+            productName: entry.name,
+            baseUrl: base,
+          ),
     );
     if (saved == true && mounted) {
       setState(() => _message = 'Specs saved for ${entry.name}.');
@@ -223,13 +230,16 @@ class _CountScreenState extends State<CountScreen> {
         '/api/inventory/opening-count',
         {
           'notes': 'Counted on mobile',
-          'items': _entries
-              .map((e) => {
-                    'barcode': e.barcode,
-                    'sealed_count': e.sealedCount,
-                    'open_weight_g': e.openWeightG,
-                  })
-              .toList(),
+          'items':
+              _entries
+                  .map(
+                    (e) => {
+                      'barcode': e.barcode,
+                      'sealed_count': e.sealedCount,
+                      'open_weight_g': e.openWeightG,
+                    },
+                  )
+                  .toList(),
         },
         timeout: const Duration(seconds: 45),
       );
@@ -242,7 +252,8 @@ class _CountScreenState extends State<CountScreen> {
           _entries.clear();
           _counting = false;
           _submitting = false;
-          _message = 'Count submitted: $recorded recorded'
+          _message =
+              'Count submitted: $recorded recorded'
               '${failed > 0 ? ', $failed skipped (missing specs)' : ''}.';
         });
       } else if (resp.statusCode == 401 || resp.statusCode == 403) {
@@ -275,37 +286,39 @@ class _CountScreenState extends State<CountScreen> {
         actions: [
           if (_entries.isNotEmpty)
             TextButton(
-              onPressed: _submitting
-                  ? null
-                  : () async {
-                      final ok = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Discard this count?'),
-                          content: Text(
-                            '${_entries.length} bottle(s) have been counted but not '
-                            'submitted. They will be lost.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('Keep counting'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(ctx, true),
-                              child: const Text('Discard'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (ok == true && mounted) {
-                        setState(() {
-                          _entries.clear();
-                          _counting = false;
-                          _message = null;
-                        });
-                      }
-                    },
+              onPressed:
+                  _submitting
+                      ? null
+                      : () async {
+                        final ok = await showDialog<bool>(
+                          context: context,
+                          builder:
+                              (ctx) => AlertDialog(
+                                title: const Text('Discard this count?'),
+                                content: Text(
+                                  '${_entries.length} bottle(s) have been counted but not '
+                                  'submitted. They will be lost.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('Keep counting'),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text('Discard'),
+                                  ),
+                                ],
+                              ),
+                        );
+                        if (ok == true && mounted) {
+                          setState(() {
+                            _entries.clear();
+                            _counting = false;
+                            _message = null;
+                          });
+                        }
+                      },
               child: const Text('Discard'),
             ),
         ],
@@ -316,22 +329,21 @@ class _CountScreenState extends State<CountScreen> {
             scale: _scale,
             counting: _counting,
             count: _entries.length,
-            onToggle: () => setState(() {
-              _counting = !_counting;
-              _message = _counting
-                  ? 'Scan a bottle to add it to the count.'
-                  : 'Counting paused.';
-            }),
+            onToggle:
+                () => setState(() {
+                  _counting = !_counting;
+                  _message =
+                      _counting
+                          ? 'Scan a bottle to add it to the count.'
+                          : 'Counting paused.';
+                }),
           ),
           if (_message != null)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               color: Colors.blue.withValues(alpha: 0.06),
-              child: Text(
-                _message!,
-                style: const TextStyle(fontSize: 12.5),
-              ),
+              child: Text(_message!, style: const TextStyle(fontSize: 12.5)),
             ),
           if (needingSpecs > 0)
             Container(
@@ -345,34 +357,55 @@ class _CountScreenState extends State<CountScreen> {
               ),
             ),
           Expanded(
-            child: _entries.isEmpty
-                ? const _EmptyCount()
-                : ListView.separated(
-                    itemCount: _entries.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, i) {
-                      final e = _entries[_entries.length - 1 - i];
-                      return ListTile(
-                        title: Text(e.name),
-                        subtitle: Text(
-                          '${e.openWeightG.toStringAsFixed(0)} g open · '
-                          '${e.sealedCount} sealed'
-                          '${e.brand.isNotEmpty ? ' · ${e.brand}' : ''}',
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        trailing: e.needsSpecs
-                            ? TextButton(
-                                onPressed: () => _measureSpecs(e),
-                                child: const Text('Measure'),
-                              )
-                            : const Icon(
-                                Icons.check_circle,
-                                color: Colors.green,
-                                size: 20,
+            child:
+                _entries.isEmpty
+                    ? const _EmptyCount()
+                    : ListView.separated(
+                      itemCount: _entries.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, i) {
+                        final e = _entries[_entries.length - 1 - i];
+                        return ListTile(
+                          title: Text(e.name),
+                          subtitle: Text(
+                            '${e.openWeightG.toStringAsFixed(0)} g open · '
+                            '${e.sealedCount} sealed'
+                            '${e.brand.isNotEmpty ? ' · ${e.brand}' : ''}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (e.needsSpecs)
+                                TextButton(
+                                  onPressed: () => _measureSpecs(e),
+                                  child: const Text('Measure'),
+                                )
+                              else
+                                const Icon(
+                                  Icons.check_circle,
+                                  color: Colors.green,
+                                  size: 20,
+                                ),
+                              // A bad weight or a mis-scan should be removable
+                              // on its own — discarding the whole count to fix
+                              // one bottle is not a real option mid-stocktake.
+                              IconButton(
+                                tooltip: 'Remove from count',
+                                icon: const Icon(Icons.close, size: 18),
+                                onPressed:
+                                    () => setState(() {
+                                      _entries.removeWhere(
+                                        (x) => x.barcode == e.barcode,
+                                      );
+                                      _message = 'Removed ${e.name}.';
+                                    }),
                               ),
-                      );
-                    },
-                  ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
           ),
           if (_entries.isNotEmpty)
             SafeArea(

@@ -44,7 +44,7 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _signIn() async {
     final base = widget.getServerBaseUrl();
     if (base == null) {
-      setState(() => _error = 'Set the server URL on the Scale tab first.');
+      setState(() => _error = 'The app service is temporarily unavailable.');
       return;
     }
     setState(() {
@@ -68,6 +68,17 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   Future<void> _signOut() async {
+    // Order matters. Release the claim while the session is still valid —
+    // afterwards the request would be unauthenticated and the scale would stay
+    // claimed by someone who has gone home.
+    final base = widget.getServerBaseUrl();
+    if (base != null) await SmartBarApi.releaseScale(base);
+
+    // Then drop the Bluetooth link. The app is unusable signed out, and
+    // leaving a live connection to a scale nobody is signed in to would mean
+    // readings arriving with no one to attribute them to.
+    ScaleService.instance.requestDisconnect();
+
     await SmartBarApi.signOutUser();
     if (!mounted) return;
     setState(() {});
@@ -84,6 +95,9 @@ class _AccountScreenState extends State<AccountScreen> {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              // The app gates on sign-in at launch, so this screen only ever
+              // renders signed in. The fallback stays for the moment between
+              // signing out and the gate rebuilding.
               if (user != null) ..._signedIn() else ..._signedOut(),
               const SizedBox(height: 28),
               const Divider(),
@@ -130,11 +144,24 @@ class _AccountScreenState extends State<AccountScreen> {
                       business ?? 'No business assigned',
                       style: TextStyle(
                         fontSize: 12.5,
-                        color: business == null
-                            ? Colors.orange
-                            : Colors.black54,
+                        color:
+                            business == null ? Colors.orange : Colors.black54,
                       ),
                     ),
+                    if (SmartBarApi.role != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          SmartBarApi.canSeeFinancials
+                              ? '${SmartBarApi.role} · full access'
+                              : '${SmartBarApi.role} · scanning and counts, '
+                                  'costs and pricing hidden',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: Colors.black45,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -159,9 +186,11 @@ class _AccountScreenState extends State<AccountScreen> {
       ),
       const SizedBox(height: 8),
       const Text(
-        'Signing out keeps the scale connected and scanning — it only removes '
-        'access to counts, logging and costs.',
-        style: TextStyle(fontSize: 12, color: Colors.black54),
+        'Signing out releases the scale and disconnects it. You will need to '
+        'reconnect after signing back in.\n\n'
+        'To hand the scale to someone else, you can just disconnect Bluetooth '
+        '— there is no need to sign out.',
+        style: TextStyle(fontSize: 12, color: Colors.black54, height: 1.4),
       ),
     ];
   }
@@ -174,9 +203,9 @@ class _AccountScreenState extends State<AccountScreen> {
       ),
       const SizedBox(height: 6),
       const Text(
-        'Scanning works without signing in. Counts, event logging and inventory '
-        'need an account, so actions can be attributed and costs stay private to '
-        'your business.',
+        'Anyone at the bar can sign in with their own account — owner, manager '
+        'or staff. Scans made while you are signed in are recorded against you, '
+        'so a shortfall can be traced to a shift rather than a serial number.',
         style: TextStyle(fontSize: 12.5, color: Colors.black54, height: 1.4),
       ),
       const SizedBox(height: 16),
@@ -235,19 +264,6 @@ class _AccountScreenState extends State<AccountScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Server',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Where this app sends data. Normally read from the scale, but it '
-                  'can be set here so the app works before a scale is paired.',
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
-                ),
-                const SizedBox(height: 10),
-                _ServerUrlField(),
-                const SizedBox(height: 24),
-                const Text(
                   'Scale',
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                 ),
@@ -280,93 +296,6 @@ class _AccountScreenState extends State<AccountScreen> {
           },
         );
       },
-    );
-  }
-}
-
-/// Editable server URL.
-///
-/// Previously the URL could only be set through the device config dialog, which
-/// requires an active BLE connection — so a fresh install with no scale nearby
-/// had no way to reach the API at all, and every tab reported "no server URL
-/// configured" with no way to fix it.
-class _ServerUrlField extends StatefulWidget {
-  @override
-  State<_ServerUrlField> createState() => _ServerUrlFieldState();
-}
-
-class _ServerUrlFieldState extends State<_ServerUrlField> {
-  late final TextEditingController _ctrl;
-  bool _dirty = false;
-  String? _saved;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = TextEditingController(text: ScaleService.instance.serverUrl.value);
-    ScaleService.instance.serverUrl.addListener(_onExternalChange);
-  }
-
-  /// Keep in step when the scale reports its own configured URL over BLE,
-  /// unless the field is mid-edit.
-  void _onExternalChange() {
-    if (!mounted || _dirty) return;
-    final value = ScaleService.instance.serverUrl.value;
-    if (value != _ctrl.text) setState(() => _ctrl.text = value);
-  }
-
-  @override
-  void dispose() {
-    ScaleService.instance.serverUrl.removeListener(_onExternalChange);
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _save() {
-    final value = _ctrl.text.trim();
-    ScaleService.instance.setServerUrl(value, persist: true);
-    setState(() {
-      _dirty = false;
-      _saved = value.isEmpty ? 'Cleared.' : 'Saved.';
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextField(
-          controller: _ctrl,
-          keyboardType: TextInputType.url,
-          autocorrect: false,
-          onChanged: (_) => setState(() {
-            _dirty = true;
-            _saved = null;
-          }),
-          decoration: const InputDecoration(
-            labelText: 'Server URL',
-            hintText: 'https://smartbarscale.com',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            FilledButton.tonal(
-              onPressed: _dirty ? _save : null,
-              child: const Text('Save'),
-            ),
-            const SizedBox(width: 12),
-            if (_saved != null)
-              Text(
-                _saved!,
-                style: const TextStyle(fontSize: 12, color: Colors.green),
-              ),
-          ],
-        ),
-      ],
     );
   }
 }

@@ -11,9 +11,8 @@ import 'scale_service.dart';
 /// claim exists to close. Making it the first screen means there is no path
 /// that quietly bypasses it.
 ///
-/// The server URL is editable here because it has to be: a fresh install with
-/// no scale paired yet has no other way to learn where the API lives, and
-/// without it sign-in cannot even be attempted.
+/// Sign-in always starts against the trusted bootstrap endpoint compiled into
+/// the app. Endpoint configuration is deliberately not user-editable.
 class LoginScreen extends StatefulWidget {
   final VoidCallback onSignedIn;
 
@@ -28,40 +27,22 @@ class _LoginScreenState extends State<LoginScreen> {
   static const _ink = Color(0xFF0D0F12);
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  late final TextEditingController _urlCtrl;
   bool _busy = false;
-  bool _showServerField = false;
   String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _urlCtrl = TextEditingController(
-      text: ScaleService.instance.serverUrl.value,
-    );
-    // Nowhere to sign in to yet, so open the field rather than making someone
-    // hunt for it behind a failed attempt.
-    _showServerField = ScaleService.instance.serverUrl.value.trim().isEmpty;
-  }
 
   @override
   void dispose() {
     _emailCtrl.dispose();
     _passCtrl.dispose();
-    _urlCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _signIn() async {
-    final url = _urlCtrl.text.trim();
-    if (url.isNotEmpty && url != ScaleService.instance.serverUrl.value) {
-      ScaleService.instance.setServerUrl(url, persist: true);
-    }
     final base = ScaleService.instance.baseUrl;
     if (base == null) {
       setState(() {
-        _showServerField = true;
-        _error = 'Enter the server address first.';
+        _error =
+            'The app service is not configured. Install the latest app version.';
       });
       return;
     }
@@ -191,20 +172,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         isDense: true,
                       ),
                     ),
-                    if (_showServerField) ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _urlCtrl,
-                        keyboardType: TextInputType.url,
-                        autocorrect: false,
-                        decoration: const InputDecoration(
-                          labelText: 'Server address',
-                          hintText: 'https://smartbarscale.com',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                      ),
-                    ],
                     if (_error != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
@@ -221,15 +188,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: Text(_busy ? 'Signing in...' : 'Sign in'),
                       ),
                     ),
-                    if (!_showServerField)
-                      TextButton(
-                        onPressed:
-                            () => setState(() => _showServerField = true),
-                        child: const Text(
-                          'Change server address',
-                          style: TextStyle(fontSize: 12.5),
-                        ),
-                      ),
                     const SizedBox(height: 8),
                     Text(
                       'You will connect the scale over Bluetooth after signing in.',

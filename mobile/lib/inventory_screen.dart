@@ -57,7 +57,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     if (base == null) {
       setState(() {
         _loading = false;
-        _error = 'Set the server URL on the Account tab to connect.';
+        _error = 'The app service is temporarily unavailable.';
       });
       return;
     }
@@ -129,13 +129,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => SpecCaptureSheet(
-        barcode: item['barcode'].toString(),
-        productName: item['name']?.toString() ?? '',
-        baseUrl: base,
-        initialVolumeMl: _toDouble(item['bottle_volume_ml']),
-        wasEstimated: item['specs_estimated'] == true,
-      ),
+      builder:
+          (_) => SpecCaptureSheet(
+            barcode: item['barcode'].toString(),
+            productName: item['name']?.toString() ?? '',
+            baseUrl: base,
+            initialVolumeMl: _toDouble(item['bottle_volume_ml']),
+            wasEstimated: item['specs_estimated'] == true,
+          ),
     );
     if (saved == true) _load();
   }
@@ -182,57 +183,61 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 _FilterChip(
                   label: 'All',
                   selected: _filter == 'all',
-                  onTap: () => setState(() {
-                    _filter = 'all';
-                    _load();
-                  }),
+                  onTap:
+                      () => setState(() {
+                        _filter = 'all';
+                        _load();
+                      }),
                 ),
                 const SizedBox(width: 8),
                 _FilterChip(
                   label: 'Below par (${_counts['below_par'] ?? 0})',
                   selected: _filter == 'low_stock',
-                  onTap: () => setState(() {
-                    _filter = 'low_stock';
-                    _load();
-                  }),
+                  onTap:
+                      () => setState(() {
+                        _filter = 'low_stock';
+                        _load();
+                      }),
                 ),
                 const SizedBox(width: 8),
                 _FilterChip(
                   label: 'Needs measuring (${_counts['needs_specs'] ?? 0})',
                   selected: _filter == 'missing_specs',
-                  onTap: () => setState(() {
-                    _filter = 'missing_specs';
-                    _load();
-                  }),
+                  onTap:
+                      () => setState(() {
+                        _filter = 'missing_specs';
+                        _load();
+                      }),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        _error!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.red),
+            child:
+                _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _error != null
+                    ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          _error!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.red),
+                        ),
+                      ),
+                    )
+                    : _items.isEmpty
+                    ? const _EmptyInventory()
+                    : RefreshIndicator(
+                      onRefresh: _load,
+                      child: ListView.separated(
+                        itemCount: _items.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (context, i) => _row(_items[i]),
                       ),
                     ),
-                  )
-                : _items.isEmpty
-                ? const _EmptyInventory()
-                : RefreshIndicator(
-                    onRefresh: _load,
-                    child: ListView.separated(
-                      itemCount: _items.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, i) => _row(_items[i]),
-                    ),
-                  ),
           ),
         ],
       ),
@@ -261,9 +266,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 bottles == null
                     ? '${item['on_hand_ml'] ?? 0} ml'
                     : '${bottles.toStringAsFixed(1)} bottles',
-                if (item['on_hand_value'] != null)
+                // Stock levels are everyone's business; what it cost is not.
+                if (SmartBarApi.canSeeFinancials &&
+                    item['on_hand_value'] != null)
                   '\$${_toDouble(item['on_hand_value'])!.toStringAsFixed(2)}',
-                if (pourCost != null) '${pourCost.toStringAsFixed(1)}% pour cost',
+                if (SmartBarApi.canSeeFinancials && pourCost != null)
+                  '${pourCost.toStringAsFixed(1)}% pour cost',
               ].join(' · '),
               style: const TextStyle(fontSize: 12),
             ),
@@ -296,16 +304,21 @@ class _InventoryScreenState extends State<InventoryScreen> {
           if (v == 'price') _editPricing(item);
           if (v == 'measure') _measure(item);
         },
-        itemBuilder: (_) => [
-          const PopupMenuItem(
-            value: 'price',
-            child: Text('Pour price & par'),
-          ),
-          const PopupMenuItem(
-            value: 'measure',
-            child: Text('Measure bottle'),
-          ),
-        ],
+        itemBuilder:
+            (_) => [
+              // Pricing is manager territory. Measuring a bottle is not — it is
+              // physical work anyone can do, and the more people who can, the
+              // fewer products sit on estimated weights.
+              if (SmartBarApi.canSeeFinancials)
+                const PopupMenuItem(
+                  value: 'price',
+                  child: Text('Pour price & par'),
+                ),
+              const PopupMenuItem(
+                value: 'measure',
+                child: Text('Measure bottle'),
+              ),
+            ],
       ),
     );
   }
@@ -336,6 +349,7 @@ class _PricingSheetState extends State<_PricingSheet> {
     _sizeCtrl = TextEditingController(text: s(widget.item['pour_volume_ml']));
     _parCtrl = TextEditingController(text: s(widget.item['par_level']));
     _costCtrl = TextEditingController(text: s(widget.item['cost_per_bottle']));
+    _loadBenchmark();
   }
 
   @override
@@ -347,9 +361,111 @@ class _PricingSheetState extends State<_PricingSheet> {
     super.dispose();
   }
 
+  Map<String, dynamic>? _benchmark;
+  bool _benchLoading = true;
+
   double? _val(TextEditingController c) {
     final t = c.text.trim();
     return t.isEmpty ? null : double.tryParse(t);
+  }
+
+  /// What other bars charge for this product.
+  ///
+  /// Pour price only, aggregated, and suppressed entirely below the contributor
+  /// floor. Purchase cost is never part of this — what a bar negotiates with
+  /// its distributor stays private.
+  Future<void> _loadBenchmark() async {
+    final id = widget.item['product_id'];
+    if (id == null) {
+      setState(() => _benchLoading = false);
+      return;
+    }
+    try {
+      final data = await SmartBarApi.getJson(
+        widget.baseUrl,
+        '/api/benchmark/pour-prices?product_id=$id',
+      );
+      final items = (data as Map)['items'] as List;
+      if (!mounted) return;
+      setState(() {
+        _benchmark = items.isEmpty ? null : items.first as Map<String, dynamic>;
+        _benchLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _benchLoading = false);
+    }
+  }
+
+  Widget _buildBenchmark() {
+    if (_benchLoading) return const SizedBox.shrink();
+    final b = _benchmark;
+    if (b == null) return const SizedBox.shrink();
+
+    if (b['available'] != true) {
+      final have = b['contributors'] ?? 0;
+      final need = b['needed'] ?? 5;
+      return Container(
+        margin: const EdgeInsets.only(top: 14),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          'No price comparison yet — $have of $need other businesses have priced '
+          'this product. Comparisons stay hidden until enough bars contribute '
+          'that no individual price can be identified.',
+          style: const TextStyle(
+            fontSize: 12,
+            color: Colors.black54,
+            height: 1.4,
+          ),
+        ),
+      );
+    }
+
+    final median = b['median_per_45ml'];
+    final range = b['range_per_45ml'] as Map<String, dynamic>?;
+    final position = b['position'] ?? b['your_position'];
+    final colour =
+        position == 'above_range'
+            ? Colors.orange
+            : position == 'below_range'
+            ? Colors.blue
+            : Colors.green;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: colour.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Other bars: \$$median per 45ml'
+            '${range != null ? '  (middle range \$${range['p25']}–\$${range['p75']})' : ''}',
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: colour,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            'Based on ${b['contributors']} businesses, normalised to a 45ml serve. '
+            'Median and range only — never individual prices, never purchase costs.',
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.black54,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Live pour cost from the values being typed, so the manager sees the
@@ -500,6 +616,22 @@ class _PricingSheetState extends State<_PricingSheet> {
                 ),
               ],
             ),
+            _buildBenchmark(),
+            if (widget.item['cost_per_bottle'] == null &&
+                widget.item['reference_cost'] != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  'Wholesale list price is \$${widget.item['reference_cost']}. '
+                  'Enter what you actually pay — your cost stays private to your '
+                  'business and is never shared or compared.',
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: Colors.black54,
+                    height: 1.35,
+                  ),
+                ),
+              ),
             if (preview != null)
               Container(
                 margin: const EdgeInsets.only(top: 14),

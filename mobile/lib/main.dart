@@ -155,8 +155,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _wifiScanLoading = false;
   VoidCallback? _onWifiScanUpdated;
 
-  // Server config (stored locally in app)
-  String _serverUrl = '';
+  // Internally managed service endpoint. It is never displayed or editable.
+  String _serverUrl = ScaleService.defaultServerUrl;
 
   // Device registration info from backend
   String _deviceSerial = '';
@@ -188,8 +188,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     // Session and server URL are already restored by the gate in AppShell,
     // which will not build this screen until both have landed.
-    // The Account tab can also set the server URL. Mirror it back so this
-    // screen's own lookups and its "no server" banner stay in step.
+    // Mirror internally managed endpoint changes so this screen's requests
+    // stay in step with a future authenticated tenant route.
     ScaleService.instance.serverUrl.addListener(_onSharedServerUrlChanged);
     // Signing out happens on the Account tab but the BLE link lives here.
     ScaleService.instance.disconnectRequest.addListener(_onDisconnectRequested);
@@ -202,7 +202,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString('last_device_id');
     final name = prefs.getString('last_device_name');
-    final url = prefs.getString('server_url') ?? '';
+    final savedUrl = prefs.getString('server_url') ?? '';
+    final url =
+        savedUrl.trim().isEmpty ? ScaleService.defaultServerUrl : savedUrl;
     var serial = prefs.getString('device_serial') ?? '';
     // Discard corrupt cached serials (non-printable chars)
     if (serial.isNotEmpty && !RegExp(r'^[\x20-\x7E]+$').hasMatch(serial)) {
@@ -616,7 +618,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       );
       final url = _sanitizeBleString(data);
-      debugPrint('BLE server URL sanitized: "$url"');
+      debugPrint('BLE server endpoint received: ${url.isNotEmpty}');
       if (url.isNotEmpty && _serverUrl.isEmpty) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('server_url', url);
@@ -875,7 +877,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (baseUrl == null) {
       if (!mounted) return;
       setState(() {
-        _productError = 'Server URL not configured';
+        _productError = 'App service unavailable';
         _productLoading = false;
       });
       return;
@@ -954,7 +956,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Set the server URL first')));
+      ).showSnackBar(const SnackBar(content: Text('App service unavailable')));
       return;
     }
     double? asDouble(dynamic v) =>
@@ -2084,7 +2086,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Set Server URL in config to see business info',
+                      'App service unavailable',
                       style: TextStyle(fontSize: 13, color: cs.outline),
                     ),
                   ),
@@ -2800,7 +2802,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _showConfigDialog() async {
-    final urlCtrl = TextEditingController(text: _serverUrl);
     final idCtrl = TextEditingController(text: _deviceSerial);
     final authCtrl = TextEditingController();
 
@@ -2822,15 +2823,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextField(
-                    controller: urlCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Server URL',
-                      prefixIcon: Icon(Icons.cloud),
-                      hintText: 'https://api.example.com',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
                   TextField(
                     controller: idCtrl,
                     decoration: const InputDecoration(
@@ -2859,13 +2851,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
               FilledButton(
                 onPressed: () async {
-                  final url = urlCtrl.text.trim();
+                  final url =
+                      _serverUrl.trim().isEmpty
+                          ? ScaleService.defaultServerUrl
+                          : _serverUrl.trim();
                   final id = idCtrl.text.trim();
                   final auth = authCtrl.text.trim();
 
                   final prefs = await SharedPreferences.getInstance();
 
-                  // Save server URL locally
+                  // Keep the trusted app endpoint in sync with the scale. It
+                  // is intentionally not exposed as a user-editable setting.
                   await prefs.setString('server_url', url);
                   setState(() => _serverUrl = url);
                   ScaleService.instance.setServerUrl(url);
@@ -4049,9 +4045,8 @@ class _AppShellState extends State<AppShell> {
     super.dispose();
   }
 
-  /// Server URL is shared state: the scale screen reads it from the device over
-  /// BLE, the Account tab lets it be set by hand, and every tab consumes it.
-  /// Normalisation lives on the service so there is one definition of it.
+  /// The internally managed endpoint is shared by every tab. Normalisation
+  /// lives on the service so there is one definition of it.
   String? _serverBaseUrl() => ScaleService.instance.baseUrl;
 
   @override

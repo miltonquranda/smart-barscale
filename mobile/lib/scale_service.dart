@@ -17,6 +17,13 @@ class ScaleService {
   ScaleService._();
   static final ScaleService instance = ScaleService._();
 
+  /// Trusted bootstrap endpoint compiled into the production app.
+  ///
+  /// Users never edit this value. If tenant-specific routing is introduced,
+  /// sign-in still starts here and the authenticated response can return a
+  /// validated tenant endpoint (and, if needed, a handoff token).
+  static const String defaultServerUrl = 'https://smartbarscale.com';
+
   /// Raw weight string as the firmware reports it (e.g. "1204.5").
   final ValueNotifier<String> weightRaw = ValueNotifier<String>('--');
 
@@ -33,7 +40,9 @@ class ScaleService {
 
   /// API base URL. Configured on the scale screen (and read back from the
   /// device over BLE), but every tab needs it, so it lives here.
-  final ValueNotifier<String> serverUrl = ValueNotifier<String>('');
+  final ValueNotifier<String> serverUrl = ValueNotifier<String>(
+    defaultServerUrl,
+  );
 
   /// Emits every barcode as it is scanned, including repeats of the same code.
   ///
@@ -61,6 +70,16 @@ class ScaleService {
     if (s.contains('place') || s.contains('wait')) return false;
     return w > 0;
   }
+
+  /// Bumped to ask the scale screen to drop its BLE link.
+  ///
+  /// Signing out has to disconnect the scale, but the connection is owned by
+  /// the scale screen and the sign-out happens elsewhere. Rather than thread a
+  /// callback through every screen, whoever holds the connection listens here.
+  final ValueNotifier<int> disconnectRequest = ValueNotifier<int>(0);
+
+  /// Ask for the scale to be disconnected.
+  void requestDisconnect() => disconnectRequest.value++;
 
   void setWeight(String raw) => weightRaw.value = raw;
   void setStatus(String value) => status.value = value;
@@ -91,7 +110,7 @@ class ScaleService {
 
   static const _serverUrlKey = 'server_url';
 
-  /// Load the stored URL immediately at startup.
+  /// Load the internally managed URL immediately at startup.
   ///
   /// The scale screen also loads this, but it does so asynchronously as part of
   /// restoring the whole BLE device, and the other tabs are built before that
@@ -99,8 +118,8 @@ class ScaleService {
   /// launch has a URL to work with instead of reporting it as unconfigured.
   Future<void> restore() async {
     final prefs = await SharedPreferences.getInstance();
-    final url = prefs.getString(_serverUrlKey) ?? '';
-    if (url.isNotEmpty) serverUrl.value = url;
+    final url = prefs.getString(_serverUrlKey) ?? defaultServerUrl;
+    serverUrl.value = url.trim().isEmpty ? defaultServerUrl : url;
   }
 
   /// Normalised base URL, or null when nothing usable is configured.
