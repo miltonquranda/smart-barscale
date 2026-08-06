@@ -118,8 +118,11 @@ class ScaleService {
   /// launch has a URL to work with instead of reporting it as unconfigured.
   Future<void> restore() async {
     final prefs = await SharedPreferences.getInstance();
-    final url = prefs.getString(_serverUrlKey) ?? defaultServerUrl;
-    serverUrl.value = url.trim().isEmpty ? defaultServerUrl : url;
+    // Replace values saved by older builds that exposed an editable field.
+    // Future tenant routing should write here only after an authenticated,
+    // validated bootstrap response.
+    serverUrl.value = defaultServerUrl;
+    await prefs.setString(_serverUrlKey, defaultServerUrl);
   }
 
   /// Normalised base URL, or null when nothing usable is configured.

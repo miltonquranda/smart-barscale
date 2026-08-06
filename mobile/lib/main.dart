@@ -202,9 +202,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString('last_device_id');
     final name = prefs.getString('last_device_name');
-    final savedUrl = prefs.getString('server_url') ?? '';
-    final url =
-        savedUrl.trim().isEmpty ? ScaleService.defaultServerUrl : savedUrl;
+    // Older builds allowed this preference to be edited. Always replace it
+    // with the trusted bootstrap endpoint on launch.
+    const url = ScaleService.defaultServerUrl;
+    await prefs.setString('server_url', url);
     var serial = prefs.getString('device_serial') ?? '';
     // Discard corrupt cached serials (non-printable chars)
     if (serial.isNotEmpty && !RegExp(r'^[\x20-\x7E]+$').hasMatch(serial)) {
