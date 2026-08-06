@@ -13,7 +13,8 @@ import 'events_screen.dart';
 import 'inventory_screen.dart';
 import 'scale_service.dart';
 import 'spec_capture.dart';
-
+import 'login_screen.dart';
+import 'swap_prompt.dart';
 
 // ─── BLE UUIDs (must match ESP32 firmware) ───
 final _svcConfig = Uuid.parse('b4e3a900-5a2b-4f1c-9d7a-000000000001');
@@ -32,6 +33,11 @@ final _charBarcode = Uuid.parse('b4e3a902-5a2b-4f1c-9d7a-000000000002');
 final _charStatus = Uuid.parse('b4e3a903-5a2b-4f1c-9d7a-000000000002');
 final _charCommand = Uuid.parse('b4e3a904-5a2b-4f1c-9d7a-000000000002');
 
+const _smartBarGold = Color(0xFFFFC107);
+const _smartBarAmber = Color(0xFFF2A900);
+const _smartBarInk = Color(0xFF0D0F12);
+const _smartBarSurface = Color(0xFF171A1F);
+
 void main() => runApp(const OmniScaleApp());
 
 class OmniScaleApp extends StatelessWidget {
@@ -44,15 +50,67 @@ class OmniScaleApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1565C0),
+          seedColor: _smartBarGold,
           brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFFFFCF4),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: _smartBarInk,
+          foregroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+        ),
+        cardTheme: CardThemeData(
+          color: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Color(0xFFE4D9B8)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: _smartBarAmber, width: 2),
+          ),
         ),
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1565C0),
+          seedColor: _smartBarGold,
           brightness: Brightness.dark,
+        ),
+        scaffoldBackgroundColor: _smartBarInk,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: _smartBarInk,
+          foregroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+        ),
+        cardTheme: CardThemeData(
+          color: _smartBarSurface,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: _smartBarSurface,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Color(0xFF34383F), width: 1),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: _smartBarGold, width: 2),
+          ),
         ),
         useMaterial3: true,
       ),
@@ -68,7 +126,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final _ble = FlutterReactiveBle();
 
   // Connection state
@@ -109,7 +167,15 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic>? _product;
   bool _productLoading = false;
   String? _productError;
+  bool _discardScanning = false;
   bool _addProductDialogOpen = false;
+  bool _swapPromptOpen = false;
+
+  /// How long a dropped Bluetooth link is given to come back before the scale
+  /// is handed back. Long enough to survive a walk to the cellar, short enough
+  /// that a scale left behind frees up within a shift change.
+  static const Duration _releaseGrace = Duration(minutes: 2);
+  Timer? _releaseTimer;
   final Set<String> _promptedBarcodes = <String>{};
 
   bool get _connected => _connState == DeviceConnectionState.connected;
@@ -117,14 +183,18 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    SmartBarApi.restore();
-    // Load the stored server URL immediately. The BLE device restore below also
-    // sets it, but it completes after the other tabs have already built and
-    // asked for it.
-    ScaleService.instance.restore();
+    // Another phone may have taken the scale while this app was backgrounded,
+    // so the holder is re-read on resume rather than trusted from before.
+    WidgetsBinding.instance.addObserver(this);
+    // Session and server URL are already restored by the gate in AppShell,
+    // which will not build this screen until both have landed.
     // The Account tab can also set the server URL. Mirror it back so this
     // screen's own lookups and its "no server" banner stay in step.
     ScaleService.instance.serverUrl.addListener(_onSharedServerUrlChanged);
+    // Signing out happens on the Account tab but the BLE link lives here.
+    ScaleService.instance.disconnectRequest.addListener(_onDisconnectRequested);
+    // Signing in mid-session should claim the scale without reconnecting.
+    SmartBarApi.currentUser.addListener(_onSignedInUserChanged);
     _loadSavedDevice();
   }
 
@@ -150,7 +220,7 @@ class _HomePageState extends State<HomePage> {
     });
     ScaleService.instance.setServerUrl(url);
     SmartBarApi.setSerial(serial);
-              ScaleService.instance.setSerial(serial);
+    ScaleService.instance.setSerial(serial);
   }
 
   Future<void> _saveDevice(String id, String name) async {
@@ -206,9 +276,16 @@ class _HomePageState extends State<HomePage> {
         .listen(
           (state) {
             setState(() => _connState = state.connectionState);
-            ScaleService.instance.setConnected(
-              state.connectionState == DeviceConnectionState.connected,
-            );
+            final isConnected =
+                state.connectionState == DeviceConnectionState.connected;
+            ScaleService.instance.setConnected(isConnected);
+            if (isConnected) {
+              // The link is back, so this was a blip rather than someone
+              // leaving. Keep the claim.
+              _releaseTimer?.cancel();
+              _releaseTimer = null;
+              _refreshOperator();
+            }
             if (state.connectionState == DeviceConnectionState.connected) {
               _saveDevice(id, name);
               // Extract device serial from BLE name (e.g. "OmniScale-SB_A40FB1215788")
@@ -229,6 +306,9 @@ class _HomePageState extends State<HomePage> {
                 _status = 'disconnected';
                 _wifiStatus = 'unknown';
               });
+              // Walking away from the scale is how you hand it back — there is
+              // no reason to make someone find a button for it.
+              _releaseAfterDisconnect();
             }
           },
           onError: (_) {
@@ -239,6 +319,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _disconnect() {
+    // Tapping disconnect is a decision, not a dropout, so the scale is handed
+    // back immediately rather than after the grace window.
+    _releaseTimer?.cancel();
+    _releaseTimer = null;
+    _releaseScaleNow();
     _connSub?.cancel();
     _cancelSubscriptions();
     setState(() {
@@ -300,6 +385,13 @@ class _HomePageState extends State<HomePage> {
               if (code != _barcode) {
                 setState(() => _barcode = code);
                 _fetchProduct(code);
+                // A scan is the point where attribution is decided, so confirm
+                // who the server thinks is weighing before the weight lands.
+                _refreshOperator();
+                // The device posts the weight itself, so the app finds out
+                // about a bottle change by asking. Give the write a moment to
+                // land before looking.
+                _checkForSwap(code);
               }
             }
           }
@@ -469,7 +561,7 @@ class _HomePageState extends State<HomePage> {
         });
         setState(() => _deviceSerial = serial);
         SmartBarApi.setSerial(serial);
-              ScaleService.instance.setSerial(serial);
+        ScaleService.instance.setSerial(serial);
       }
     }
   }
@@ -507,7 +599,7 @@ class _HomePageState extends State<HomePage> {
           await prefs.setString('device_serial', serial);
           if (mounted) setState(() => _deviceSerial = serial);
           SmartBarApi.setSerial(serial);
-              ScaleService.instance.setSerial(serial);
+          ScaleService.instance.setSerial(serial);
         }
       } catch (e) {
         debugPrint('BLE read deviceID FAILED: $e');
@@ -658,80 +750,86 @@ class _HomePageState extends State<HomePage> {
 
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Staff sign in'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Assigning a device to a business requires a manager or admin '
-                'account.',
-                style: TextStyle(fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                autocorrect: false,
-                decoration: const InputDecoration(
-                  labelText: 'Email',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: passCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Password',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              if (error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: Text(
-                    error!,
-                    style: const TextStyle(color: Colors.red, fontSize: 12),
+      builder:
+          (ctx) => StatefulBuilder(
+            builder:
+                (ctx, setDialogState) => AlertDialog(
+                  title: const Text('Staff sign in'),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Assigning a device to a business requires a manager or admin '
+                        'account.',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: emailCtrl,
+                        keyboardType: TextInputType.emailAddress,
+                        autocorrect: false,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: passCtrl,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Password',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                      if (error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Text(
+                            error!,
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
+                  actions: [
+                    TextButton(
+                      onPressed: busy ? null : () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed:
+                          busy
+                              ? null
+                              : () async {
+                                setDialogState(() {
+                                  busy = true;
+                                  error = null;
+                                });
+                                final err = await SmartBarApi.loginUser(
+                                  base,
+                                  emailCtrl.text.trim(),
+                                  passCtrl.text,
+                                );
+                                if (err == null) {
+                                  if (ctx.mounted) Navigator.pop(ctx, true);
+                                } else {
+                                  setDialogState(() {
+                                    busy = false;
+                                    error = err;
+                                  });
+                                }
+                              },
+                      child: Text(busy ? 'Signing in...' : 'Sign in'),
+                    ),
+                  ],
                 ),
-            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: busy ? null : () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: busy
-                  ? null
-                  : () async {
-                      setDialogState(() {
-                        busy = true;
-                        error = null;
-                      });
-                      final err = await SmartBarApi.loginUser(
-                        base,
-                        emailCtrl.text.trim(),
-                        passCtrl.text,
-                      );
-                      if (err == null) {
-                        if (ctx.mounted) Navigator.pop(ctx, true);
-                      } else {
-                        setDialogState(() {
-                          busy = false;
-                          error = err;
-                        });
-                      }
-                    },
-              child: Text(busy ? 'Signing in...' : 'Sign in'),
-            ),
-          ],
-        ),
-      ),
     );
     return ok ?? false;
   }
@@ -854,9 +952,9 @@ class _HomePageState extends State<HomePage> {
     final base = _getServerBaseUrl();
     if (base == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Set the server URL first')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Set the server URL first')));
       return;
     }
     double? asDouble(dynamic v) =>
@@ -869,21 +967,132 @@ class _HomePageState extends State<HomePage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => SpecCaptureSheet(
-        barcode: barcode,
-        productName: _product?['product_name']?.toString() ?? barcode,
-        baseUrl: base,
-        initialFullWeight: asDouble(_product?['bottle_full_weight_g']),
-        initialEmptyWeight: asDouble(_product?['bottle_empty_weight_g']),
-        initialVolumeMl: asDouble(_product?['bottle_volume_ml']),
-        wasEstimated: _product?['specs_estimated'] == true,
-      ),
+      builder:
+          (_) => SpecCaptureSheet(
+            barcode: barcode,
+            productName: _product?['product_name']?.toString() ?? barcode,
+            baseUrl: base,
+            initialFullWeight: asDouble(_product?['bottle_full_weight_g']),
+            initialEmptyWeight: asDouble(_product?['bottle_empty_weight_g']),
+            initialVolumeMl: asDouble(_product?['bottle_volume_ml']),
+            wasEstimated: _product?['specs_estimated'] == true,
+          ),
     );
     if (saved == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Measurements saved')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Measurements saved')));
       _fetchProduct(barcode);
+    }
+  }
+
+  /// Throw away a bad scan.
+  ///
+  /// A partial or misread barcode is worse than useless: the weight is parked
+  /// server-side waiting to become the opening reading for whatever product is
+  /// eventually created under that code. Clearing it locally is not enough —
+  /// the parked scan has to go too.
+  Future<void> _discardScan() async {
+    final barcode = _barcode;
+    setState(() => _discardScanning = true);
+    final base = _getServerBaseUrl();
+    var discarded = 0;
+    if (base != null && barcode != '--') {
+      try {
+        final resp = await SmartBarApi.post(
+          base,
+          '/api/inventory/pending-scans/discard',
+          {'barcode': barcode},
+        );
+        if (resp.statusCode == 200) {
+          discarded = (jsonDecode(resp.body)['discarded'] ?? 0) as int;
+        }
+      } catch (_) {
+        // Clearing the screen still helps even if the server call failed.
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _discardScanning = false;
+      _barcode = '--';
+      _product = null;
+      _productError = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(discarded > 0 ? 'Scan discarded' : 'Cleared'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _confirmUndo() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Undo last reading?'),
+            content: Text(
+              'Removes the most recent reading for '
+              '${_product?['product_name'] ?? _barcode} and restores the previous '
+              'stock position. Only works for readings taken in the last hour.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Undo'),
+              ),
+            ],
+          ),
+    );
+    if (ok == true) await _undoLastReading();
+  }
+
+  /// Undo the reading a good scan just wrote.
+  ///
+  /// For when the barcode read fine but the weight did not — the bottle was
+  /// still settling, or only half on the platform. That reading becomes the
+  /// baseline for the next one, so leaving it in place corrupts the *next*
+  /// consumption figure as well as this one.
+  Future<void> _undoLastReading() async {
+    final base = _getServerBaseUrl();
+    if (base == null || _barcode == '--') return;
+    try {
+      final resp = await SmartBarApi.post(
+        base,
+        '/api/inventory/undo-last-reading',
+        {'barcode': _barcode},
+      );
+      if (!mounted) return;
+      final body = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (resp.statusCode == 200) {
+        final now = body['now'];
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              now == null
+                  ? 'Reading removed. No earlier reading for this product.'
+                  : 'Reading removed. Back to '
+                      '${(now['total_volume_on_hand_ml'] ?? 0).round()} ml on hand.',
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(body['error']?.toString() ?? 'Could not undo.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not reach the server.')),
+      );
     }
   }
 
@@ -1011,9 +1220,10 @@ class _HomePageState extends State<HomePage> {
       weightCtrl.text = _product!['weight'] ?? '';
       pourPriceCtrl.text = (_product!['pour_price'] ?? '').toString();
       pourVolumeCtrl.text = (_product!['pour_volume_ml'] ?? '').toString();
-      fullWeightCtrl.text = (_product!['bottle_full_weight_g'] ?? '').toString();
-      emptyWeightCtrl.text = (_product!['bottle_empty_weight_g'] ?? '')
-          .toString();
+      fullWeightCtrl.text =
+          (_product!['bottle_full_weight_g'] ?? '').toString();
+      emptyWeightCtrl.text =
+          (_product!['bottle_empty_weight_g'] ?? '').toString();
       volumeMlCtrl.text = (_product!['bottle_volume_ml'] ?? '').toString();
       costCtrl.text = (_product!['cost_per_bottle'] ?? '').toString();
       originCtrl.text = _product!['country_of_origin'] ?? '';
@@ -1147,6 +1357,215 @@ class _HomePageState extends State<HomePage> {
     refCtrl.dispose();
   }
 
+  /// Hand the scale back a short while after the link drops.
+  ///
+  /// Bluetooth disconnects on its own — someone steps into the cellar, the
+  /// phone screen locks, the radio hiccups. Releasing the instant the link
+  /// drops would hand the scale away mid-count and the next readings would
+  /// record nobody. So a dropout is given a grace window to come back, and
+  /// only a real departure releases.
+  ///
+  /// This is a deliberate trade: the cost of waiting is that a scale someone
+  /// walked away from stays claimed for [_releaseGrace]. The cost of not
+  /// waiting is misattributed readings, which is worse.
+  void _releaseAfterDisconnect() {
+    if (!SmartBarApi.operatorIsMe.value) return;
+    _releaseTimer?.cancel();
+    _releaseTimer = Timer(_releaseGrace, () {
+      if (!mounted || _connected) return;
+      _releaseScaleNow();
+    });
+  }
+
+  Future<void> _releaseScaleNow() async {
+    if (!SmartBarApi.operatorIsMe.value) return;
+    final base = _getServerBaseUrl();
+    if (base == null) return;
+    await SmartBarApi.releaseScale(base);
+  }
+
+  /// Read who currently holds the scale, without claiming it.
+  ///
+  /// Several phones can be connected to one scale at once. Connecting is not
+  /// the same as taking responsibility for it, so this only *looks*.
+  /// One row: who has the scale, and the single action available.
+  Widget _operatorBanner({
+    required ColorScheme cs,
+    required IconData icon,
+    required Color background,
+    required Color foreground,
+    required String message,
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: foreground),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: foreground,
+              ),
+            ),
+          ),
+          if (actionLabel != null)
+            TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                foregroundColor: foreground,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(actionLabel, style: const TextStyle(fontSize: 12.5)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Ask whether the server parked this scan for review, and if so, prompt.
+  ///
+  /// The scale posts its own readings, so the app cannot intercept the write.
+  /// It asks afterwards instead. The prompt has to happen here, at the bar, in
+  /// front of the bottle — a week later nobody remembers how many bottles went
+  /// through on Friday.
+  Future<void> _checkForSwap(String barcode) async {
+    final base = _getServerBaseUrl();
+    if (base == null || !SmartBarApi.hasUserSession) return;
+
+    // The device write and this read race; a short wait avoids asking before
+    // the reading exists.
+    await Future.delayed(const Duration(milliseconds: 1200));
+    if (!mounted) return;
+
+    final reviews = await SmartBarApi.pendingReviews(base);
+    if (!mounted || reviews.isEmpty) return;
+
+    Map<String, dynamic>? match;
+    for (final r in reviews) {
+      if (r['barcode']?.toString() == barcode) {
+        match = r;
+        break;
+      }
+    }
+    if (match == null) return;
+
+    // Don't stack prompts if scans arrive quickly.
+    if (_swapPromptOpen) return;
+    _swapPromptOpen = true;
+    try {
+      final resolved = await SwapPrompt.show(context, match, base);
+      if (resolved && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Bottle change recorded')));
+        _fetchProduct(barcode);
+      }
+    } finally {
+      _swapPromptOpen = false;
+    }
+  }
+
+  Future<void> _refreshOperator() async {
+    final base = _getServerBaseUrl();
+    if (base == null || _deviceSerial.isEmpty) return;
+    await SmartBarApi.refreshOperator(base, _deviceSerial);
+  }
+
+  /// Deliberately take the scale — "I am the one weighing".
+  ///
+  /// Explicit rather than automatic on connect. If the app claimed on connect,
+  /// the last phone to open would silently own the scans while someone else
+  /// did the weighing, and a real person's name would end up on another
+  /// person's shortfall.
+  Future<void> _startWeighing() async {
+    final base = _getServerBaseUrl();
+    if (base == null || _deviceSerial.isEmpty) return;
+    if (!SmartBarApi.hasUserSession) return;
+
+    final heldBy = SmartBarApi.operatorName.value;
+    if (heldBy != null && !SmartBarApi.operatorIsMe.value) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder:
+            (ctx) => AlertDialog(
+              title: const Text('Take over the scale?'),
+              content: Text(
+                '$heldBy is currently recorded as weighing on this scale. '
+                'Taking over means new scans are recorded against you instead.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Take over'),
+                ),
+              ],
+            ),
+      );
+      if (ok != true) return;
+    }
+
+    final tookOverFrom = await SmartBarApi.claimScale(base, _deviceSerial);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          tookOverFrom != null && tookOverFrom.isNotEmpty
+              ? 'Taken over from $tookOverFrom — scans now recorded against you'
+              : 'Scans will be recorded against you',
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _stopWeighing() async {
+    final base = _getServerBaseUrl();
+    if (base == null) return;
+    await SmartBarApi.releaseScale(base);
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Scale released')));
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Coming back to the foreground is exactly when the banner is most likely
+    // to be wrong: someone else may have taken the scale in the meantime, and
+    // acting on a stale name is how the wrong person gets blamed.
+    if (state == AppLifecycleState.resumed) _refreshOperator();
+  }
+
+  void _onSignedInUserChanged() {
+    if (!mounted) return;
+    setState(() {});
+    // Look, don't claim. Signing in does not mean you are the one weighing.
+    if (SmartBarApi.hasUserSession) _refreshOperator();
+  }
+
+  /// Drop the scale because something outside this screen asked — signing out.
+  void _onDisconnectRequested() {
+    if (!mounted || !_connected) return;
+    _disconnect();
+  }
+
   void _onSharedServerUrlChanged() {
     final shared = ScaleService.instance.serverUrl.value;
     if (mounted && shared != _serverUrl) {
@@ -1156,7 +1575,13 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _releaseTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    SmartBarApi.currentUser.removeListener(_onSignedInUserChanged);
     ScaleService.instance.serverUrl.removeListener(_onSharedServerUrlChanged);
+    ScaleService.instance.disconnectRequest.removeListener(
+      _onDisconnectRequested,
+    );
     _scanSub?.cancel();
     _connSub?.cancel();
     _cancelSubscriptions();
@@ -1255,11 +1680,136 @@ class _HomePageState extends State<HomePage> {
             : cs.primary;
     final statusText = isError ? _status.substring(6) : _status;
 
+    final wifiUp = _wifiStatus.startsWith('connected');
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // ─── Offline warning ───
+          //
+          // Without this, a scan taken while the scale is offline looks like it
+          // worked: the barcode arrives over BLE, the phone looks the product
+          // up over its *own* network, and the product card fills in. But the
+          // scale is the thing that posts to /api/bottle-stats, so nothing is
+          // recorded and nothing appears on the dashboard.
+          //
+          // The firmware has no offline queue, so that scan is gone for good —
+          // which makes this warning the only signal the operator gets.
+          if (!wifiUp)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: cs.errorContainer,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: cs.error.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.cloud_off, color: cs.error, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Scale is offline — scans are NOT being recorded',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: cs.onErrorContainer,
+                            fontSize: 13.5,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Product details below come from your phone. The scale '
+                          'itself has no Wi-Fi, so nothing reaches the dashboard '
+                          'and the reading is lost.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: cs.onErrorContainer,
+                            height: 1.35,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        FilledButton.tonal(
+                          onPressed: _openWiFiSettings,
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          child: const Text('Set up Wi-Fi'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          // ─── Who is operating this scale ───
+          //
+          // Several phones can be connected to one scale at once, but only one
+          // person weighs at a time. So this shows three distinct things, and
+          // the difference between them matters:
+          //
+          //   * nobody holds it   — scans record no operator
+          //   * you hold it       — scans record you
+          //   * someone else does — scans record them, not you
+          //
+          // The third case is why claiming is a button rather than something
+          // that happens on connect. A phone that merely wakes up in a pocket
+          // must not take the scale from the person actually using it.
+          ValueListenableBuilder<String?>(
+            valueListenable: SmartBarApi.operatorName,
+            builder: (context, operator, _) {
+              return ValueListenableBuilder<bool>(
+                valueListenable: SmartBarApi.operatorIsMe,
+                builder: (context, isMe, _) {
+                  // No signed-out state here: the app gates on sign-in at
+                  // launch, so anyone looking at this screen has a session.
+                  if (operator != null && isMe) {
+                    return _operatorBanner(
+                      cs: cs,
+                      icon: Icons.person,
+                      background: cs.primaryContainer,
+                      foreground: cs.onPrimaryContainer,
+                      message: 'You are weighing — scans recorded as $operator',
+                      // Handing the scale back explicitly. Disconnecting
+                      // Bluetooth does the same thing, so this is a
+                      // convenience rather than the only route.
+                      actionLabel: 'Done',
+                      onAction: _stopWeighing,
+                    );
+                  }
+                  if (operator != null) {
+                    // Someone else holds it. Never silently take it.
+                    return _operatorBanner(
+                      cs: cs,
+                      icon: Icons.person_pin_circle_outlined,
+                      background: cs.tertiaryContainer,
+                      foreground: cs.onTertiaryContainer,
+                      message:
+                          '$operator is weighing — scans are recorded '
+                          'against them',
+                      actionLabel: 'Take over',
+                      onAction: _startWeighing,
+                    );
+                  }
+                  return _operatorBanner(
+                    cs: cs,
+                    icon: Icons.person_outline,
+                    background: cs.surfaceContainerHighest,
+                    foreground: cs.outline,
+                    message: 'No one is recorded as weighing on this scale',
+                    actionLabel: "I'm weighing",
+                    onAction: _startWeighing,
+                  );
+                },
+              );
+            },
+          ),
           // Status chip
           Center(
             child: Chip(
@@ -1702,18 +2252,37 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ],
               ),
-              if (_productError == 'Product not found' && _barcode != '--')
+              if (_productError == 'Product not found' && _barcode != '--') ...[
                 Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add Product Info'),
-                      onPressed: () => _showAddProductDialog(_barcode),
-                    ),
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Scanned: $_barcode',
+                    style: TextStyle(fontSize: 12, color: cs.outline),
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Add Product'),
+                          onPressed: () => _showAddProductDialog(_barcode),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      // A misread barcode parks a scan server-side that would
+                      // otherwise become the opening reading of whatever
+                      // product someone later creates under that code.
+                      OutlinedButton(
+                        onPressed: _discardScanning ? null : _discardScan,
+                        child: Text(_discardScanning ? '...' : 'Discard'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1803,6 +2372,36 @@ class _HomePageState extends State<HomePage> {
                       GestureDetector(
                         onTap: () => _showAddProductDialog(_barcode),
                         child: Icon(Icons.edit, size: 18, color: cs.outline),
+                      ),
+                      const SizedBox(width: 14),
+                      PopupMenuButton<String>(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(
+                          Icons.more_horiz,
+                          size: 18,
+                          color: cs.outline,
+                        ),
+                        onSelected: (v) {
+                          if (v == 'undo') _confirmUndo();
+                          if (v == 'clear') {
+                            setState(() {
+                              _barcode = '--';
+                              _product = null;
+                              _productError = null;
+                            });
+                          }
+                        },
+                        itemBuilder:
+                            (_) => const [
+                              PopupMenuItem(
+                                value: 'undo',
+                                child: Text('Undo last reading'),
+                              ),
+                              PopupMenuItem(
+                                value: 'clear',
+                                child: Text('Clear this scan'),
+                              ),
+                            ],
                       ),
                     ],
                   ],
@@ -2669,9 +3268,10 @@ class _ProductFormState extends State<_ProductForm> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: suspect
-            ? Colors.orange.withValues(alpha: 0.10)
-            : Colors.black.withValues(alpha: 0.04),
+        color:
+            suspect
+                ? Colors.orange.withValues(alpha: 0.10)
+                : Colors.black.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Column(
@@ -2707,9 +3307,10 @@ class _ProductFormState extends State<_ProductForm> {
       child: TextField(
         controller: ctrl,
         maxLines: maxLines,
-        keyboardType: numeric
-            ? const TextInputType.numberWithOptions(decimal: true)
-            : TextInputType.text,
+        keyboardType:
+            numeric
+                ? const TextInputType.numberWithOptions(decimal: true)
+                : TextInputType.text,
         // Recompute the density preview as the operator types.
         onChanged: numeric ? (_) => setState(() {}) : null,
         decoration: InputDecoration(
@@ -3421,6 +4022,33 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _index = 0;
 
+  /// Null until the stored session has been read off disk. Showing the login
+  /// screen before then would flash it at someone who is already signed in.
+  bool? _ready;
+
+  @override
+  void initState() {
+    super.initState();
+    _restore();
+    SmartBarApi.currentUser.addListener(_onSessionChanged);
+  }
+
+  Future<void> _restore() async {
+    await SmartBarApi.restore();
+    await ScaleService.instance.restore();
+    if (mounted) setState(() => _ready = true);
+  }
+
+  void _onSessionChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    SmartBarApi.currentUser.removeListener(_onSessionChanged);
+    super.dispose();
+  }
+
   /// Server URL is shared state: the scale screen reads it from the device over
   /// BLE, the Account tab lets it be set by hand, and every tab consumes it.
   /// Normalisation lives on the service so there is one definition of it.
@@ -3428,6 +4056,19 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    // ─── Nothing before sign-in ───
+    //
+    // The app is only useful with a scale connected over Bluetooth, and every
+    // reading is recorded against a person. Allowing it to be used signed-out
+    // would produce scans attributable to nobody, so the gate is the whole
+    // app rather than a per-screen check that something could route around.
+    if (_ready != true) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (!SmartBarApi.hasUserSession) {
+      return LoginScreen(onSignedIn: () => setState(() => _index = 0));
+    }
+
     return Scaffold(
       body: IndexedStack(
         index: _index,
